@@ -1,0 +1,86 @@
+[project]
+name = "domain-profiler"
+version = "0.1.0"
+description = "A Python package and CLI to gather data about a domain."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "beautifulsoup4>=4.13.4",
+    "dnspython>=2.7.0",
+    "fire>=0.7.0",
+    "lxml-html-clean>=0.4.2",
+    "mmh3>=5.1.0",
+    "pendulum>=3.1.0",
+    "python-whois>=0.9.5",
+    "requests-html>=0.10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-mock>=3.12.0", 
+    "pytest-cov>=5.0.0",
+    "pytest-xdist>=3.5.0",
+    "responses>=0.25.0",
+]
+
+[tool.poetry]
+packages = [{include = "domain_profiler", from = "src"}]
+
+
+[project.scripts]
+domain-profiler = "domain_profiler.__main__:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--cov=domain_profiler",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml",
+    "-ra",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.0",
+    "pytest-cov>=6.1.1",
+    "pytest-mock>=3.14.1",
+    "pytest-xdist>=3.7.0",
+    "responses>=0.25.7",
+    "mypy>=1.8.0",
+    "types-requests>=2.31.0",
+]
+
