@@ -192,6 +192,50 @@ class TestProfiler:
         )
         assert result['email_auth'] == {'spf': None, 'dmarc': None}
 
+    @patch('domain_profiler.profiler.RDAP')
+    @patch('domain_profiler.profiler.CAA')
+    @patch('domain_profiler.profiler.DNSSEC')
+    @patch('domain_profiler.profiler.DNSCheck')
+    def test_run_with_security_analysis(
+        self, mock_dns_check, mock_dnssec, mock_caa, mock_rdap, sample_domain
+    ):
+        """Test that security=True attaches dnssec/caa/rdap sections."""
+        mock_dns_instance = Mock()
+        mock_dns_check.return_value = mock_dns_instance
+        mock_dns_instance.get_report.return_value = {'domain': sample_domain}
+
+        mock_dnssec.return_value.validate.return_value = {'status': 'secure'}
+        mock_caa.return_value.analyze.return_value = {'present': True}
+        mock_rdap.return_value.report.return_value = {'registrar': 'X'}
+
+        profiler = Profiler()
+        result = profiler.run(sample_domain, security=True)
+
+        mock_dnssec.return_value.validate.assert_called_once_with(sample_domain)
+        mock_caa.return_value.analyze.assert_called_once_with(sample_domain)
+        mock_rdap.return_value.report.assert_called_once_with(sample_domain)
+        assert result['security']['dnssec'] == {'status': 'secure'}
+        assert result['security']['caa'] == {'present': True}
+        assert result['security']['rdap'] == {'registrar': 'X'}
+
+    @patch('domain_profiler.profiler.RDAP')
+    @patch('domain_profiler.profiler.CAA')
+    @patch('domain_profiler.profiler.DNSSEC')
+    def test_security_command_normalizes_and_delegates(
+        self, mock_dnssec, mock_caa, mock_rdap
+    ):
+        """The standalone security() command normalizes input before delegating."""
+        mock_dnssec.return_value.validate.return_value = {'status': 'insecure'}
+        mock_caa.return_value.analyze.return_value = {}
+        mock_rdap.return_value.report.return_value = {}
+
+        profiler = Profiler()
+        profiler.security("https://EXAMPLE.com:8443/path")
+
+        mock_dnssec.return_value.validate.assert_called_once_with("example.com")
+        mock_caa.return_value.analyze.assert_called_once_with("example.com")
+        mock_rdap.return_value.report.assert_called_once_with("example.com")
+
     @patch('domain_profiler.profiler.EmailAuth')
     def test_email_command_normalizes_and_delegates(self, mock_email_auth):
         """Test the standalone email() command normalizes input and delegates."""

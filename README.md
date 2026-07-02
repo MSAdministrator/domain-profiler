@@ -26,6 +26,15 @@ A comprehensive Python CLI tool and package for domain analysis and profiling. G
 - Subdomain enumeration
 - File extension analysis
 
+### 🔐 DNS-Layer Security Analysis (`--security`)
+- **DNSSEC validation** — verifies the full chain of trust (DNSKEY self-signature
+  + parent DS match), distinguishing `secure` / `bogus` / `insecure`, and flags
+  weak signing algorithms
+- **CAA policy analysis** — reports which CAs may issue certificates, climbing the
+  DNS tree as a CA would, and flags "any CA may issue" / missing iodef contact
+- **RDAP registration data** — structured registrar, registration/expiry dates,
+  EPP status codes, nameservers, and DNSSEC delegation
+
 ## Installation
 
 ### From PyPI (Recommended)
@@ -54,6 +63,12 @@ domain-profiler run example.com
 
 # Full analysis including website profiling
 domain-profiler run example.com --live
+
+# Include DNS-layer security analysis (DNSSEC, CAA, RDAP)
+domain-profiler run example.com --security
+
+# Security analysis only
+domain-profiler security example.com
 ```
 
 ### Python API Usage
@@ -69,6 +84,11 @@ dns_data = profiler.run("example.com")
 # Full analysis with website profiling
 full_data = profiler.run("example.com", live=True)
 
+# DNS-layer security analysis (DNSSEC / CAA / RDAP)
+security_data = profiler.run("example.com", security=True)
+# ...or standalone:
+security_only = profiler.security("example.com")
+
 print(full_data)
 ```
 
@@ -79,13 +99,15 @@ print(full_data)
 The CLI is built using Google Fire, providing an intuitive interface:
 
 ```bash
-domain-profiler run DOMAIN [--live]
+domain-profiler run DOMAIN [--live] [--email] [--security]
 ```
 
 #### Parameters
 
 - `DOMAIN`: The domain to analyze (required)
 - `--live`: Enable website analysis in addition to DNS (optional, default: False)
+- `--email`: Enable email-authentication analysis — SPF/DKIM/DMARC/BIMI/MX (optional, default: False)
+- `--security`: Enable DNS-layer security analysis — DNSSEC/CAA/RDAP (optional, default: False)
 
 #### Examples
 
