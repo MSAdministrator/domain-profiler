@@ -35,6 +35,23 @@ packages = ["src/domain_profiler"]
 [project.scripts]
 domain-profiler = "domain_profiler.__main__:main"
 
+[tool.mutmut]
+# Mutate the package source. Scope a run to one module by passing a glob to
+# `only_mutate` on the CLI, or narrow this list; see the test-quality skill /
+# Makefile `mutation-*` targets.
+source_paths = ["src/domain_profiler"]
+# Never mutate the logger/CLI plumbing — behavior there is not meaningfully
+# test-assertable and just produces noise mutants. Scope a run to one module
+# with the Makefile `mutation-module MODULE=<name>` target (which passes an
+# `only_mutate` glob), not by editing this list.
+do_not_mutate = [
+    "src/domain_profiler/__main__.py",
+    "src/domain_profiler/logger.py",
+]
+# Disable coverage plugins during mutant runs: the per-mutant forked pytest
+# invocations don't need coverage, and the reports add overhead + write churn.
+pytest_add_cli_args = ["-p", "no:cacheprovider", "--no-cov"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
@@ -86,5 +103,6 @@ dev = [
     "responses>=0.25.7",
     "mypy>=1.8.0",
     "types-requests>=2.31.0",
+    "mutmut>=3.6.0",
 ]
 

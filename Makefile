@@ -1,6 +1,6 @@
 # Makefile for domain-profiler development
 
-.PHONY: help install test test-fast test-coverage test-unit test-integration clean lint format check
+.PHONY: help install test test-fast test-coverage test-unit test-integration clean lint format check mutation mutation-module mutation-results mutation-survivors mutation-html mutation-clean
 
 help:  ## Show this help message
 	@echo "Available commands:"
@@ -71,4 +71,29 @@ dev-setup:  ## Complete development setup
 	$(MAKE) install
 	@echo "Development environment ready!"
 	@echo "Run 'make test' to run the test suite"
+
+# --- Mutation testing (test-quality) ---------------------------------------
+# Mutation testing measures whether tests would *catch* bugs, not just run code.
+# Config lives in [tool.mutmut] in pyproject.toml. See the test-quality skill
+# for the full sufficiency->necessity workflow.
+
+mutation:  ## Run mutation testing on the whole package (slow)
+	uv run mutmut run
+
+mutation-module:  ## Mutate one module only, e.g. `make mutation-module MODULE=caa`
+	@test -n "$(MODULE)" || (echo "Usage: make mutation-module MODULE=<name>  (e.g. caa)"; exit 1)
+	uv run mutmut run 'domain_profiler.$(MODULE).*'
+
+mutation-results:  ## Show the full mutant result list
+	uv run mutmut results
+
+mutation-survivors:  ## List only surviving mutants (test gaps to close)
+	@uv run mutmut results 2>/dev/null | grep ': survived' || echo "No surviving mutants 🎉"
+
+mutation-html:  ## Generate the browsable HTML mutation report
+	uv run mutmut html
+	@echo "Open html/index.html"
+
+mutation-clean:  ## Remove mutmut's cache/output
+	rm -rf mutants/ .mutmut-cache html/
 	@echo "Run 'make help' to see all available commands" 
