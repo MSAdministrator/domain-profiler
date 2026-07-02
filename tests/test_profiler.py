@@ -218,23 +218,52 @@ class TestProfiler:
         assert result['security']['caa'] == {'present': True}
         assert result['security']['rdap'] == {'registrar': 'X'}
 
+    @patch('domain_profiler.profiler.Takeover')
+    @patch('domain_profiler.profiler.TLSInspector')
     @patch('domain_profiler.profiler.RDAP')
     @patch('domain_profiler.profiler.CAA')
     @patch('domain_profiler.profiler.DNSSEC')
     def test_security_command_normalizes_and_delegates(
-        self, mock_dnssec, mock_caa, mock_rdap
+        self, mock_dnssec, mock_caa, mock_rdap, mock_tls, mock_takeover
     ):
         """The standalone security() command normalizes input before delegating."""
         mock_dnssec.return_value.validate.return_value = {'status': 'insecure'}
         mock_caa.return_value.analyze.return_value = {}
         mock_rdap.return_value.report.return_value = {}
+        mock_tls.return_value.inspect.return_value = {}
+        mock_takeover.return_value.report.return_value = {}
 
         profiler = Profiler()
-        profiler.security("https://EXAMPLE.com:8443/path")
+        result = profiler.security("https://EXAMPLE.com:8443/path")
 
         mock_dnssec.return_value.validate.assert_called_once_with("example.com")
         mock_caa.return_value.analyze.assert_called_once_with("example.com")
         mock_rdap.return_value.report.assert_called_once_with("example.com")
+        mock_tls.return_value.inspect.assert_called_once_with("example.com")
+        mock_takeover.return_value.report.assert_called_once_with("example.com")
+        assert set(result) == {"dnssec", "caa", "rdap", "tls", "takeover"}
+
+    @patch('domain_profiler.profiler.TLSInspector')
+    def test_tls_command_normalizes_and_delegates(self, mock_tls):
+        mock_tls.return_value.inspect.return_value = {"issuer": "X"}
+        profiler = Profiler()
+        result = profiler.tls("https://example.com/path", port=8443)
+        mock_tls.return_value.inspect.assert_called_once_with("example.com", port=8443)
+        assert result == {"issuer": "X"}
+
+    @patch('domain_profiler.profiler.Takeover')
+    def test_takeover_command_normalizes_and_delegates(self, mock_takeover):
+        mock_takeover.return_value.report.return_value = {"wildcard": {}}
+        profiler = Profiler()
+        profiler.takeover("https://example.com")
+        mock_takeover.return_value.report.assert_called_once_with("example.com")
+
+    @patch('domain_profiler.profiler.Typosquat')
+    def test_typosquat_command_normalizes_both_args(self, mock_typo):
+        mock_typo.return_value.analyze.return_value = {"suspicious": True}
+        profiler = Profiler()
+        profiler.typosquat("https://paypa1.com", brand="https://paypal.com")
+        mock_typo.return_value.analyze.assert_called_once_with("paypa1.com", "paypal.com")
 
     @patch('domain_profiler.profiler.EmailAuth')
     def test_email_command_normalizes_and_delegates(self, mock_email_auth):

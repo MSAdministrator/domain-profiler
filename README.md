@@ -26,7 +26,7 @@ A comprehensive Python CLI tool and package for domain analysis and profiling. G
 - Subdomain enumeration
 - File extension analysis
 
-### 🔐 DNS-Layer Security Analysis (`--security`)
+### 🔐 Security Analysis (`--security`)
 - **DNSSEC validation** — verifies the full chain of trust (DNSKEY self-signature
   + parent DS match), distinguishing `secure` / `bogus` / `insecure`, and flags
   weak signing algorithms
@@ -34,6 +34,16 @@ A comprehensive Python CLI tool and package for domain analysis and profiling. G
   DNS tree as a CA would, and flags "any CA may issue" / missing iodef contact
 - **RDAP registration data** — structured registrar, registration/expiry dates,
   EPP status codes, nameservers, and DNSSEC delegation
+- **TLS certificate inspection** — issuer, validity window, SAN coverage, key
+  strength; flags self-signed, expired, very-fresh, SAN-mismatch, and
+  untrusted-chain certificates
+- **Subdomain-takeover & wildcard detection** — detects wildcard DNS (baseline)
+  and dangling CNAMEs pointing at unprovisioned takeover-prone providers
+
+### 🎭 Typosquat / Homoglyph Detection (`typosquat`)
+- Scores a candidate domain against a known **brand** — edit-distance similarity,
+  homoglyph normalization (Cyrillic/Greek/digit look-alikes), and IDN/punycode
+  decoding to catch homograph attacks
 
 ## Installation
 
@@ -64,11 +74,20 @@ domain-profiler run example.com
 # Full analysis including website profiling
 domain-profiler run example.com --live
 
-# Include DNS-layer security analysis (DNSSEC, CAA, RDAP)
+# Include security analysis (DNSSEC, CAA, RDAP, TLS, takeover)
 domain-profiler run example.com --security
 
 # Security analysis only
 domain-profiler security example.com
+
+# Inspect just the TLS certificate
+domain-profiler tls example.com
+
+# Check for wildcard DNS / dangling-CNAME takeover risk
+domain-profiler takeover example.com
+
+# Score a candidate domain against a brand for typosquatting
+domain-profiler typosquat paypa1.com --brand paypal.com
 ```
 
 ### Python API Usage

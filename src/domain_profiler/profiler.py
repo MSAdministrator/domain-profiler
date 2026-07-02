@@ -10,6 +10,9 @@ from domain_profiler.dnssec import DNSSEC
 from domain_profiler.email_auth import EmailAuth
 from domain_profiler.site import Url
 from domain_profiler.rdap import RDAP
+from domain_profiler.takeover import Takeover
+from domain_profiler.tls import TLSInspector
+from domain_profiler.typosquat import Typosquat
 
 
 class Profiler(Base):
@@ -76,23 +79,62 @@ class Profiler(Base):
 
     @staticmethod
     def _security_report(value: str) -> Dict[str, Any]:
-        """Assemble the DNS-layer security section for an already-normalized host."""
+        """Assemble the DNS-layer + TLS security section for a normalized host."""
         return {
             "dnssec": DNSSEC().validate(value),
             "caa": CAA().analyze(value),
             "rdap": RDAP().report(value),
+            "tls": TLSInspector().inspect(value),
+            "takeover": Takeover().report(value),
         }
 
     def security(self, domain: str) -> Dict[str, Any]:
-        """Run only DNS-layer security analysis for a domain.
+        """Run only security analysis for a domain.
 
         Args:
             domain: The domain or URL to analyze
 
         Returns:
-            Dict with dnssec, caa, and rdap sections.
+            Dict with dnssec, caa, rdap, tls, and takeover sections.
         """
         return self._security_report(self._normalize_domain(domain))
+
+    def tls(self, domain: str, port: int = 443) -> Dict[str, Any]:
+        """Inspect the TLS certificate presented by a host.
+
+        Args:
+            domain: The domain or URL to connect to.
+            port: TLS port (default 443).
+
+        Returns:
+            Certificate details and derived security flags.
+        """
+        return TLSInspector().inspect(self._normalize_domain(domain), port=port)
+
+    def takeover(self, domain: str) -> Dict[str, Any]:
+        """Check a domain for wildcard DNS and dangling-CNAME takeover risk.
+
+        Args:
+            domain: The domain or URL to analyze.
+
+        Returns:
+            Dict with wildcard baseline and per-subdomain takeover checks.
+        """
+        return Takeover().report(self._normalize_domain(domain))
+
+    def typosquat(self, domain: str, brand: str) -> Dict[str, Any]:
+        """Score how likely a domain is a typosquat/look-alike of a brand.
+
+        Args:
+            domain: The candidate domain to evaluate.
+            brand: The legitimate brand domain to compare against (required).
+
+        Returns:
+            Similarity scores, IDN/homoglyph flags, and a suspicious verdict.
+        """
+        return Typosquat().analyze(
+            self._normalize_domain(domain), self._normalize_domain(brand)
+        )
 
     def email(self, domain: str, dkim_selector: Optional[str] = None) -> Dict[str, Any]:
         """Resolve only a domain's email-authentication posture.
