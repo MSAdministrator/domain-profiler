@@ -31,10 +31,6 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/domain_profiler"]
 
-[tool.poetry]
-packages = [{include = "domain_profiler", from = "src"}]
-
-
 [project.scripts]
 domain-profiler = "domain_profiler.__main__:main"
 
