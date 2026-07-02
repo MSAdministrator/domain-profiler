@@ -192,6 +192,23 @@ class TestProfiler:
         )
         assert result['email_auth'] == {'spf': None, 'dmarc': None}
 
+    @patch('domain_profiler.profiler.EmailAuth')
+    @patch('domain_profiler.profiler.DNSCheck')
+    def test_run_positional_dkim_selector_still_binds(
+        self, mock_dns_check, mock_email_auth, sample_domain
+    ):
+        """dkim_selector remains the 4th positional arg (backward compatible)."""
+        mock_dns_check.return_value.get_report.return_value = {'domain': sample_domain}
+        mock_email_auth.return_value.get_report.return_value = {}
+
+        profiler = Profiler()
+        # Legacy positional call: run(domain, live, email, dkim_selector)
+        profiler.run(sample_domain, False, True, "s1")
+
+        mock_email_auth.return_value.get_report.assert_called_once_with(
+            domain=sample_domain, dkim_selector="s1"
+        )
+
     @patch('domain_profiler.profiler.RDAP')
     @patch('domain_profiler.profiler.CAA')
     @patch('domain_profiler.profiler.DNSSEC')

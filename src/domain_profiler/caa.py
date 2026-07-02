@@ -85,6 +85,7 @@ class CAA(Base):
             "iodef": [],
             "allows_any_ca": True,
             "forbids_issuance": False,
+            "policy_unknown": False,
             "notes": [],
         }
 
@@ -92,6 +93,7 @@ class CAA(Base):
         # Climb from the FQDN up toward (but not past) the root, mirroring how a
         # CA searches for the applicable policy.
         labels = name.labels
+        any_query_ok = False
         for i in range(len(labels) - 1):
             candidate = dns.name.Name(labels[i:])
             candidate_text = candidate.to_text(omit_final_dot=True)
@@ -101,6 +103,7 @@ class CAA(Base):
             if records is None:
                 result["notes"].append(f"CAA query error at {candidate_text}")
                 continue
+            any_query_ok = True
             if records:
                 result["present"] = True
                 result["policy_domain"] = candidate_text
@@ -108,9 +111,19 @@ class CAA(Base):
                 self._interpret(records, result)
                 return result
 
-        result["notes"].append(
-            "No CAA record found — any CA may issue certificates for this domain"
-        )
+        if any_query_ok:
+            # At least one label answered authoritatively with no CAA, so the
+            # absence is real: any CA may issue.
+            result["notes"].append(
+                "No CAA record found — any CA may issue certificates for this domain"
+            )
+        else:
+            # Every lookup errored: the effective policy is unknown, not open.
+            result["allows_any_ca"] = False
+            result["policy_unknown"] = True
+            result["notes"].append(
+                "CAA policy could not be determined — all lookups failed"
+            )
         return result
 
     def _interpret(self, records: List[Dict[str, Any]], result: Dict[str, Any]) -> None:

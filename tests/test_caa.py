@@ -73,13 +73,24 @@ class TestCAA:
             result = c.analyze("example.com")
         assert any("critical" in n.lower() for n in result["notes"])
 
-    def test_query_error_returns_none_and_notes(self):
+    def test_all_queries_error_is_unknown_not_open(self):
         c = CAA()
         with patch.object(c, "_query_caa", return_value=None):
             result = c.analyze("example.com")
-        # All labels error out → no policy found, notes record the errors.
+        # All labels error out → policy is unknown, not "any CA may issue".
         assert result["present"] is False
-        assert any("query error" in n for n in result["notes"])
+        assert result["policy_unknown"] is True
+        assert result["allows_any_ca"] is False
+        assert any("could not be determined" in n for n in result["notes"])
+
+    def test_authoritative_no_caa_allows_any_ca(self):
+        """A clean NoAnswer (not an error) means the absence is real."""
+        c = CAA()
+        with patch.object(c, "_query_caa", return_value=[]):
+            result = c.analyze("example.com")
+        assert result["policy_unknown"] is False
+        assert result["allows_any_ca"] is True
+        assert any("any CA may issue" in n for n in result["notes"])
 
     def test_query_caa_handles_no_answer(self):
         """_query_caa returns [] (not None) for NoAnswer/NXDOMAIN."""

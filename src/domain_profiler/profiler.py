@@ -43,8 +43,8 @@ class Profiler(Base):
         domain: str,
         live: bool = False,
         email: bool = False,
-        security: bool = False,
         dkim_selector: Optional[str] = None,
+        security: bool = False,
     ) -> Dict[str, Any]:
         """Run domain analysis with optional website, email, and security analysis.
 
@@ -53,9 +53,9 @@ class Profiler(Base):
             live: Whether to include live website analysis
             email: Whether to include email-authentication analysis
                 (SPF/DKIM/DMARC/BIMI/MX)
+            dkim_selector: Optional extra DKIM selector to probe first
             security: Whether to include DNS-layer security analysis
                 (DNSSEC validation, CAA policy, RDAP registration data)
-            dkim_selector: Optional extra DKIM selector to probe first
 
         Returns:
             Dictionary containing analysis results

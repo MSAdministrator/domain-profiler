@@ -59,7 +59,7 @@ class DNSSEC(Base):
                 domain, dns.rdatatype.A, want_dnssec=True
             )
             request.flags |= dns.flags.AD
-            response = dns.query.udp(
+            response, _ = dns.query.udp_with_fallback(
                 request, self._resolver_address(), timeout=self.QUERY_TIMEOUT
             )
             return bool(response.flags & dns.flags.AD)
@@ -89,7 +89,10 @@ class DNSSEC(Base):
         try:
             request = dns.message.make_query(name, rdtype, want_dnssec=True)
             request.flags |= dns.flags.CD
-            response = dns.query.udp(
+            # udp_with_fallback retries over TCP when the UDP answer is
+            # truncated (TC=1) — DNSKEY/DS RRsets frequently exceed UDP limits,
+            # and a truncated answer would otherwise look like "no keys".
+            response, _ = dns.query.udp_with_fallback(
                 request, self._resolver_address(), timeout=self.QUERY_TIMEOUT
             )
             return response
@@ -105,7 +108,7 @@ class DNSSEC(Base):
         """
         try:
             request = dns.message.make_query(name, dns.rdatatype.DNSKEY, want_dnssec=True)
-            response = dns.query.udp(
+            response, _ = dns.query.udp_with_fallback(
                 request, self._resolver_address(), timeout=self.QUERY_TIMEOUT
             )
             return response.rcode() == dns.rcode.SERVFAIL
@@ -209,32 +212,46 @@ class DNSSEC(Base):
             return result
 
         # 3. Confirm the parent DS matches one of the zone's keys.
-        ds_ok = self._validate_ds(name, dnskey_rrset, result)
-        result["ds_validated"] = ds_ok
+        ds_state = self._validate_ds(name, dnskey_rrset, result)
+        result["ds_validated"] = ds_state == "match"
 
-        if result["dnskey_validated"] and ds_ok:
+        if result["dnskey_validated"] and ds_state == "match":
             result["status"] = "secure"
-        elif not ds_ok:
-            # Self-signed keys with no matching parent DS = an island of trust;
-            # treat as bogus since the chain does not anchor upward.
+        elif ds_state == "mismatch":
+            # A DS is published at the parent but does not match any zone key:
+            # the delegation claims to be signed and the anchor is broken. Bogus.
             result["status"] = "bogus"
+        elif ds_state == "absent":
+            # No DS at the parent: the delegation is unsigned. The self-signed
+            # keys form an island of trust that does not chain to the root, which
+            # validators treat as insecure (not bogus).
+            result["status"] = "insecure"
+        # ds_state == "error": leave status as-is (insecure default) and rely on
+        # the recorded error note; we can't prove the chain either way.
 
         return result
 
     def _validate_ds(
         self, name: dns.name.Name, dnskey_rrset: Any, result: Dict[str, Any]
-    ) -> bool:
-        """Fetch the parent DS and confirm it hashes to a zone key."""
+    ) -> str:
+        """Fetch the parent DS and classify the anchor.
+
+        Returns one of:
+          "match"    — a published DS hashes to a zone key (chain anchors);
+          "mismatch" — DS present but matches no key (broken anchor → bogus);
+          "absent"   — no DS at the parent (unsigned delegation → insecure);
+          "error"    — the DS lookup itself failed (unknown).
+        """
         try:
             ds_answer = dns.resolver.resolve(
                 name, dns.rdatatype.DS, lifetime=self.QUERY_TIMEOUT
             )
-        except dns.resolver.NoAnswer:
-            result["errors"].append("No DS record at parent (delegation unsigned)")
-            return False
+        except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
+            result["errors"].append("No DS record at parent (unsigned delegation)")
+            return "absent"
         except Exception as exc:
             result["errors"].append(f"DS query failed: {exc}")
-            return False
+            return "error"
 
         published_ds = set()
         for ds in ds_answer:
@@ -249,6 +266,6 @@ class DNSSEC(Base):
                 except Exception:
                     continue
                 if candidate.to_text() in published_ds:
-                    return True
+                    return "match"
         result["errors"].append("Parent DS does not match any zone DNSKEY")
-        return False
+        return "mismatch"
