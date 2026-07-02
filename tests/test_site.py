@@ -453,7 +453,8 @@ class TestUrl:
 
     def test_is_abnormal_url_uses_substring_not_regex(self):
         """A domain name with regex metachars is matched literally."""
-        with patch('domain_profiler.site.HTMLSession'):
+        with patch('domain_profiler.site.Url.session') as mock_session:
+            mock_session.get.side_effect = Exception("network disabled in unit tests")
             with patch('domain_profiler.site.whois.whois',
                        return_value={'domain_name': 'example.com'}):
                 # "." is a regex any-char; a literal check must reject this URL.
