@@ -103,7 +103,7 @@ dns_data = profiler.run("example.com")
 # Full analysis with website profiling
 full_data = profiler.run("example.com", live=True)
 
-# DNS-layer security analysis (DNSSEC / CAA / RDAP)
+# Security analysis (DNSSEC / CAA / RDAP / TLS / subdomain-takeover)
 security_data = profiler.run("example.com", security=True)
 # ...or standalone:
 security_only = profiler.security("example.com")
@@ -126,7 +126,7 @@ domain-profiler run DOMAIN [--live] [--email] [--security]
 - `DOMAIN`: The domain to analyze (required)
 - `--live`: Enable website analysis in addition to DNS (optional, default: False)
 - `--email`: Enable email-authentication analysis — SPF/DKIM/DMARC/BIMI/MX (optional, default: False)
-- `--security`: Enable DNS-layer security analysis — DNSSEC/CAA/RDAP (optional, default: False)
+- `--security`: Enable security analysis — DNSSEC/CAA/RDAP/TLS/subdomain-takeover (optional, default: False)
 
 #### Examples
 

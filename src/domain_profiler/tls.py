@@ -48,11 +48,17 @@ class TLSInspector(Base):
             return None
 
     def _chain_trusted(self, host: str, port: int) -> bool:
-        """Return True if the cert validates against the system trust store.
+        """Return True if the cert chain validates against the system trust store.
 
-        A normal verified handshake proves trust + hostname match in one step.
+        Hostname checking is disabled here so this reflects *chain trust only*:
+        whether the leaf chains to a trusted root with valid, in-date signatures.
+        Hostname/SAN coverage is reported separately via ``san_mismatch``, so a
+        cert that is trusted but presented on the wrong host still reports
+        ``chain_trusted=True`` (with ``san_mismatch=True``) rather than
+        conflating the two failures.
         """
         context = ssl.create_default_context()
+        context.check_hostname = False
         try:
             with socket.create_connection((host, port), timeout=self.TIMEOUT) as sock:
                 with context.wrap_socket(sock, server_hostname=host):
@@ -145,6 +151,7 @@ class TLSInspector(Base):
             "not_after": None,
             "serial_number": None,
             "signature_algorithm": None,
+            "signature_hash": None,
             "subject_alt_names": [],
             "key": {"type": None, "bits": None, "weak": False},
             "self_signed": None,
@@ -171,10 +178,19 @@ class TLSInspector(Base):
         result["issuer_org"] = self._name_attr(cert.issuer, NameOID.ORGANIZATION_NAME)
         result["subject"] = self._name_attr(cert.subject, NameOID.COMMON_NAME)
         result["serial_number"] = str(cert.serial_number)
+        # signature_algorithm is the full algorithm (e.g. "sha256WithRSAEncryption"
+        # / "ecdsa-with-SHA384"); signature_hash is just the digest ("sha256").
         try:
-            result["signature_algorithm"] = cert.signature_hash_algorithm.name  # type: ignore[union-attr]
+            oid = cert.signature_algorithm_oid
+            # ._name is the friendly name (e.g. "sha256WithRSAEncryption"); fall
+            # back to the dotted OID string if that private attr is unavailable.
+            result["signature_algorithm"] = getattr(oid, "_name", None) or oid.dotted_string
         except Exception:
             result["signature_algorithm"] = None
+        try:
+            result["signature_hash"] = cert.signature_hash_algorithm.name  # type: ignore[union-attr]
+        except Exception:
+            result["signature_hash"] = None
 
         not_before = cert.not_valid_before_utc
         not_after = cert.not_valid_after_utc

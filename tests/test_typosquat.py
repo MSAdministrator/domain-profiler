@@ -47,8 +47,21 @@ class TestTyposquat:
         r = Typosquat().analyze("xn--pypal-4ve.com", "paypal.com")
         assert r["is_idn"] is True
         assert r["non_ascii"] is True
+        assert r["mixed_script"] is True
         assert r["suspicious"] is True
         assert r["identical_after_normalization"] is True
+
+    def test_mixed_script_flag(self):
+        from domain_profiler.typosquat import _is_mixed_script
+        # Latin p,y,p,a,l + Cyrillic а
+        assert _is_mixed_script("pаypal") is True
+        assert _is_mixed_script("paypal") is False
+        # Accented Latin (ü) is still single-script Latin, not mixed.
+        assert _is_mixed_script("münchen") is False
+
+    def test_pure_ascii_not_mixed_script(self):
+        r = Typosquat().analyze("paypal.com", "paypal.com")
+        assert r["mixed_script"] is False
 
     def test_rn_to_m_homoglyph(self):
         r = Typosquat().analyze("rnicrosoft.com", "microsoft.com")

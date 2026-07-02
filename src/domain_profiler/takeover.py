@@ -12,7 +12,7 @@ serve content from your trusted subdomain. Detection looks for a dangling target
 """
 
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import dns.rdatatype
 import dns.resolver
@@ -60,17 +60,28 @@ class Takeover(Base):
 
     QUERY_TIMEOUT: float = 5.0
 
-    def _resolve(self, name: str, rdtype: Any) -> Optional[List[str]]:
-        """Resolve name/rdtype. Returns values, [] for NoAnswer, None for NXDOMAIN/error."""
+    def _resolve(self, name: str, rdtype: Any) -> Tuple[str, List[str]]:
+        """Resolve name/rdtype into a (status, values) pair.
+
+        status is one of:
+          "ok"       — records returned (values non-empty);
+          "noanswer" — name exists but has no record of this type;
+          "nxdomain" — the name does not exist (authoritative);
+          "error"    — transient failure (SERVFAIL/timeout/no nameservers).
+
+        Distinguishing "nxdomain" from "error" matters: only a true NXDOMAIN on
+        a CNAME target indicates a dangling record; a transient error must not
+        be reported as a takeover candidate.
+        """
         try:
             answers = dns.resolver.resolve(name, rdtype, lifetime=self.QUERY_TIMEOUT)
-            return [r.to_text() for r in answers]
+            return ("ok", [r.to_text() for r in answers])
         except dns.resolver.NoAnswer:
-            return []
+            return ("noanswer", [])
         except dns.resolver.NXDOMAIN:
-            return None
+            return ("nxdomain", [])
         except Exception:
-            return None
+            return ("error", [])
 
     def detect_wildcard(self, domain: str) -> Dict[str, Any]:
         """Detect a wildcard record by querying random, nonexistent labels.
@@ -85,8 +96,8 @@ class Takeover(Base):
         probe_sets: List[set] = []
         for _ in range(2):
             label = f"{uuid.uuid4().hex}.{domain}"
-            answers = self._resolve(label, dns.rdatatype.A)
-            probe_sets.append(set(answers or []))
+            _status, answers = self._resolve(label, dns.rdatatype.A)
+            probe_sets.append(set(answers))
 
         # A wildcard yields the same synthesized answer for unrelated random
         # names; NXDOMAIN (None → empty set) on both means no wildcard.
@@ -119,7 +130,7 @@ class Takeover(Base):
             "notes": [],
         }
 
-        cnames = self._resolve(subdomain, dns.rdatatype.CNAME)
+        cname_status, cnames = self._resolve(subdomain, dns.rdatatype.CNAME)
         if not cnames:
             return result
 
@@ -128,9 +139,11 @@ class Takeover(Base):
         provider = self._match_provider(target)
         result["provider"] = provider
 
-        # Does the CNAME target itself resolve?
-        target_a = self._resolve(target, dns.rdatatype.A)
-        if target_a is None:
+        # Does the CNAME target itself resolve? Only a *true* NXDOMAIN indicates
+        # a dangling record; a transient error (SERVFAIL/timeout) must not be
+        # reported as a takeover candidate (false positive).
+        target_status, _target_a = self._resolve(target, dns.rdatatype.A)
+        if target_status == "nxdomain":
             # NXDOMAIN on the target while the CNAME still points at it: the
             # classic dangling-record takeover candidate.
             result["dangling"] = True
@@ -144,6 +157,13 @@ class Takeover(Base):
                 result["notes"].append(
                     "CNAME target does not resolve (NXDOMAIN) — possible dangling record"
                 )
+        elif target_status == "error":
+            # Couldn't determine — surface it without asserting a takeover.
+            result["notes"].append(
+                "CNAME target resolution failed transiently — could not assess dangling status"
+            )
+            if provider:
+                result["risk"] = "low"
         elif provider:
             result["risk"] = "low"
             result["notes"].append(

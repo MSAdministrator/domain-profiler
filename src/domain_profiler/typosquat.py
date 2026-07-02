@@ -16,9 +16,37 @@ Everything here is stdlib-only (no dnstwist/confusable-homoglyphs dependency);
 the homoglyph map covers the common confusables used in real phishing.
 """
 
+import unicodedata
 from typing import Any, Dict, List, Optional
 
 from domain_profiler.base import Base
+
+
+def _script_of(ch: str) -> Optional[str]:
+    """Best-effort Unicode script name for a character (stdlib only).
+
+    Derives the script from the character's Unicode name (e.g. "CYRILLIC SMALL
+    LETTER A" → "CYRILLIC"). ASCII letters map to "LATIN"; digits, hyphens and
+    other common label punctuation are script-neutral (return None) so they
+    don't create spurious "mixed script" signals.
+    """
+    if ch in "-0123456789.":
+        return None
+    if ch.isascii() and ch.isalpha():
+        return "LATIN"
+    try:
+        name = unicodedata.name(ch)
+    except ValueError:
+        return None
+    # The script is the first token of names like "CYRILLIC SMALL LETTER A",
+    # "GREEK SMALL LETTER ALPHA", "LATIN SMALL LETTER A".
+    return name.split(" ", 1)[0]
+
+
+def _is_mixed_script(label: str) -> bool:
+    """True if a label mixes ≥2 Unicode scripts (a homograph-attack hallmark)."""
+    scripts = {s for s in (_script_of(ch) for ch in label) if s}
+    return len(scripts) > 1
 
 
 # Common visual confusables → their Latin lookalike. Enough to catch the
@@ -91,8 +119,13 @@ class Typosquat(Base):
 
     @staticmethod
     def _decode_idn(label: str) -> Dict[str, Any]:
-        """Decode a punycode (xn--) label to Unicode; flag non-ASCII/mixed script."""
-        info: Dict[str, Any] = {"decoded": label, "is_idn": False, "non_ascii": False}
+        """Decode a punycode (xn--) label to Unicode; flag non-ASCII and mixed script."""
+        info: Dict[str, Any] = {
+            "decoded": label,
+            "is_idn": False,
+            "non_ascii": False,
+            "mixed_script": False,
+        }
         if label.startswith("xn--"):
             info["is_idn"] = True
             try:
@@ -100,6 +133,7 @@ class Typosquat(Base):
             except Exception:
                 info["decoded"] = label
         info["non_ascii"] = any(ord(ch) > 127 for ch in info["decoded"])
+        info["mixed_script"] = _is_mixed_script(info["decoded"])
         return info
 
     def analyze(self, domain: str, brand: str) -> Dict[str, Any]:
@@ -135,11 +169,19 @@ class Typosquat(Base):
             notes.append(f"Internationalized (punycode) domain decodes to '{decoded_label}'")
         if idn["non_ascii"]:
             notes.append("Label contains non-ASCII characters (possible homograph)")
+        if idn["mixed_script"]:
+            notes.append("Label mixes multiple Unicode scripts (homograph-attack hallmark)")
 
         best_similarity = max(raw_similarity, normalized_similarity)
         suspicious = (
             decoded_label != brand_label
-            and (best_similarity >= self.SUSPICIOUS_SIMILARITY or exact_after_fold)
+            and (
+                best_similarity >= self.SUSPICIOUS_SIMILARITY
+                or exact_after_fold
+                # A mixed-script label impersonating a single-script brand is
+                # suspicious even at lower string similarity.
+                or idn["mixed_script"]
+            )
         )
         if suspicious and not notes:
             notes.append(
@@ -156,6 +198,7 @@ class Typosquat(Base):
             "normalized_similarity": round(normalized_similarity, 3),
             "is_idn": idn["is_idn"],
             "non_ascii": idn["non_ascii"],
+            "mixed_script": idn["mixed_script"],
             "identical_after_normalization": exact_after_fold,
             "suspicious": suspicious,
             "notes": notes,

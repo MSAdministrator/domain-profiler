@@ -76,6 +76,9 @@ class TestTLSInspector:
         assert r["chain_trusted"] is True
         assert r["key"]["type"] == "RSA"
         assert r["key"]["bits"] == 2048
+        # signature_algorithm is the full algorithm; signature_hash is the digest.
+        assert r["signature_algorithm"] == "sha256WithRSAEncryption"
+        assert r["signature_hash"] == "sha256"
 
     def test_self_signed_flagged(self):
         t = TLSInspector()
