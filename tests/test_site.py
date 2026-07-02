@@ -438,7 +438,8 @@ class TestUrl:
 
     def test_has_suspicious_forms_scans_all_forms(self):
         """A suspicious form after a benign one is still detected."""
-        with patch('domain_profiler.site.HTMLSession'):
+        with patch('domain_profiler.site.Url.session') as mock_session:
+            mock_session.get.side_effect = Exception("network disabled in unit tests")
             with patch('domain_profiler.site.whois.whois', return_value={}):
                 url_instance = Url("https://example.com")
                 mock_response = Mock()
