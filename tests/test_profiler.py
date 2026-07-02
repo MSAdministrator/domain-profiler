@@ -221,6 +221,8 @@ class TestProfiler:
         ("https://EXAMPLE.COM", "example.com"),  # lowercased
         ("example.com", "example.com"),  # No scheme, used as-is
         ("example.com:8443", "example.com"),  # bare host + port
+        ("[2001:db8::1]:443", "2001:db8::1"),  # bare IPv6 literal + port
+        ("https://[2001:db8::1]:443", "2001:db8::1"),  # IPv6 literal in a URL
         ("", ""),  # Empty domain
     ])
     @patch('domain_profiler.profiler.DNSCheck')

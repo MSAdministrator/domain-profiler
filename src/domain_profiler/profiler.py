@@ -29,9 +29,11 @@ class Profiler(Base):
         """
         host = urlparse(domain).hostname
         if not host:
-            # No scheme/netloc: treat the input as a bare domain and drop any
-            # stray userinfo, path, or ":port" the user may have appended.
-            host = domain.split('/')[0].split('@')[-1].split(':')[0]
+            # No scheme/netloc: re-parse with a leading "//" so urllib treats the
+            # whole input as a netloc. This strips userinfo/port/path and handles
+            # IPv6 literals (e.g. "[2001:db8::1]:443") correctly, which manual
+            # ":"-splitting would mangle.
+            host = urlparse(f"//{domain}").hostname or ""
         return host.strip().lower().rstrip('.')
 
     def run(
