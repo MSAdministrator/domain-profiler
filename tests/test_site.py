@@ -493,7 +493,8 @@ class TestUrl:
             'creation_date': [datetime(1995, 8, 14)],
             'updated_date': datetime(2023, 1, 1),
         }
-        with patch('domain_profiler.site.HTMLSession'):
+        with patch('domain_profiler.site.Url.session') as mock_session:
+            mock_session.get.side_effect = Exception("network disabled in unit tests")
             with patch('domain_profiler.site.whois.whois', return_value=whois_data):
                 url_instance = Url("https://example.com")
                 url_instance.response = None
