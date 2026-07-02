@@ -518,7 +518,8 @@ class TestUrl:
         mock_pendulum_instance.return_value = mock_date
 
         whois_data = {'creation_date': [datetime(1995, 8, 14), datetime(1996, 1, 1)]}
-        with patch('domain_profiler.site.HTMLSession'):
+        with patch('domain_profiler.site.Url.session') as mock_session:
+            mock_session.get.side_effect = Exception("network disabled in unit tests")
             with patch('domain_profiler.site.whois.whois', return_value=whois_data):
                 url_instance = Url("https://example.com")
 
