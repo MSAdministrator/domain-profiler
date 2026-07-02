@@ -1,10 +1,11 @@
 """Main profiler functionality for domain analysis."""
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 from domain_profiler.base import Base
 from domain_profiler.dns import DNSCheck
+from domain_profiler.email_auth import EmailAuth
 from domain_profiler.site import Url
 from domain_profiler.rdap import RDAP
 
@@ -33,12 +34,21 @@ class Profiler(Base):
             host = domain.split('/')[0].split('@')[-1].split(':')[0]
         return host.strip().lower().rstrip('.')
 
-    def run(self, domain: str, live: bool = False) -> Dict[str, Any]:
-        """Run domain analysis with optional live website analysis.
+    def run(
+        self,
+        domain: str,
+        live: bool = False,
+        email: bool = False,
+        dkim_selector: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Run domain analysis with optional live website and email analysis.
 
         Args:
             domain: The domain or URL to analyze
             live: Whether to include live website analysis
+            email: Whether to include email-authentication analysis
+                (SPF/DKIM/DMARC/BIMI/MX)
+            dkim_selector: Optional extra DKIM selector to probe first
 
         Returns:
             Dictionary containing analysis results
@@ -49,7 +59,25 @@ class Profiler(Base):
             response.update(
                 Url(url=f"https://{value}").to_json()
             )
+        if email:
+            response["email_auth"] = EmailAuth().get_report(
+                domain=value, dkim_selector=dkim_selector
+            )
         return response
+
+    def email(self, domain: str, dkim_selector: Optional[str] = None) -> Dict[str, Any]:
+        """Resolve only a domain's email-authentication posture.
+
+        Args:
+            domain: The domain or URL to analyze
+            dkim_selector: Optional extra DKIM selector to probe first
+
+        Returns:
+            Dict with spf/spf_tree/spf_flattened, dkim, dmarc, bimi, mx_records.
+        """
+        return EmailAuth().get_report(
+            domain=self._normalize_domain(domain), dkim_selector=dkim_selector
+        )
 
     def rdap(self) -> RDAP:
         return RDAP()
