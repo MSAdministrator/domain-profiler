@@ -42,7 +42,7 @@ class TestDNSCheck:
 
         assert 'A' in result
         assert result['A'] == ["93.184.216.34"]
-        mock_query.assert_called_with(sample_domain, 'A')
+        mock_query.assert_called_with(sample_domain, 'A', lifetime=DNSCheck.QUERY_TIMEOUT)
 
     @patch('domain_profiler.dns.resolver.query')
     def test_get_dns_info_handles_exceptions(self, mock_query, sample_domain):
@@ -157,7 +157,7 @@ class TestDNSCheck:
         dns_check = DNSCheck()
         result = dns_check.get_host(sample_ip)
 
-        assert result == "'example.com'"  # repr() adds quotes
+        assert result == "example.com"  # bare hostname, no repr() quotes
         mock_gethostbyaddr.assert_called_once_with(sample_ip)
 
     @patch('socket.gethostbyaddr')
@@ -178,7 +178,7 @@ class TestDNSCheck:
         dns_check = DNSCheck()
         result = dns_check.get_fqdn(sample_ip)
 
-        assert result == "'example.com'"
+        assert result == "example.com"
         mock_gethostbyaddr.assert_called_once_with(sample_ip)
 
     @patch('socket.gethostbyaddr')
@@ -298,6 +298,55 @@ class TestDNSCheck:
 
         assert record_type in result
         assert result[record_type] == [f"mock-{record_type}-value"]
+
+    def test_parse_txt_record_extracts_all_spf_ips(self):
+        """SPF ip4/ip6 mechanisms are all extracted, not just the first."""
+        dns_check = DNSCheck()
+        record = 'v=spf1 ip4:1.2.3.4 ip4:5.6.7.8 ip6:2001:db8::1 -all'
+
+        result = dns_check._parse_txt_record(record)
+
+        assert result == ['1.2.3.4', '5.6.7.8', '2001:db8::1']
+
+    def test_parse_txt_record_ignores_non_ips(self):
+        """Non-SPF TXT records yield no IPs rather than raising."""
+        dns_check = DNSCheck()
+        assert dns_check._parse_txt_record('google-site-verification=abc') == []
+
+    def test_dns_records_excludes_obsolete_and_meta_types(self):
+        """The record set is trimmed to useful types (no AXFR/ANY/obsolete)."""
+        dns_check = DNSCheck()
+        for absent in ('AXFR', 'IXFR', 'ANY', 'MD', 'MF', 'NULL', 'OPT'):
+            assert absent not in dns_check.DNS_RECORDS
+
+    @patch('domain_profiler.dns.resolver.query')
+    def test_get_dns_info_passes_query_timeout(self, mock_query, sample_domain):
+        """Each resolver query is bounded by a lifetime timeout."""
+        mock_response = Mock()
+        mock_response.to_text.return_value = "93.184.216.34"
+        mock_query.return_value = [mock_response]
+
+        dns_check = DNSCheck()
+        with patch.object(dns_check, 'DNS_RECORDS', ['A']):
+            dns_check.get_dns_info(sample_domain)
+
+        mock_query.assert_called_with(
+            sample_domain, 'A', lifetime=DNSCheck.QUERY_TIMEOUT
+        )
+
+    @patch.object(DNSCheck, 'get_ip')
+    @patch.object(DNSCheck, 'get_ip_x')
+    def test_get_report_drops_empty_ip(self, mock_get_ip_x, mock_get_ip, sample_domain):
+        """A failed resolution ("") must not become a bogus IP entry."""
+        mock_get_ip.return_value = ""  # resolution failed
+        mock_get_ip_x.return_value = []
+
+        with patch.object(DNSCheck, 'get_aliases', return_value=[]):
+            with patch.object(DNSCheck, 'get_dns_info', return_value={}):
+                dns_check = DNSCheck()
+                result = dns_check.get_report(sample_domain)
+
+        assert result['ips'] == {}
 
     @patch('domain_profiler.dns.resolver.query')
     def test_get_dns_info_with_list_response(self, mock_query, sample_domain):

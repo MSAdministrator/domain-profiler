@@ -178,24 +178,24 @@ class TestProfiler:
         profiler = Profiler()
         assert isinstance(profiler, Base)
 
-    @pytest.mark.parametrize("domain,expected_netloc", [
+    @pytest.mark.parametrize("domain,expected_host", [
         ("https://example.com", "example.com"),
         ("http://sub.example.com", "sub.example.com"),
-        ("https://example.com:8080", "example.com:8080"),
-        ("example.com", "example.com"),  # No scheme, should use as-is
+        ("https://example.com:8080", "example.com"),  # port stripped
+        ("https://user@example.com", "example.com"),  # userinfo stripped
+        ("https://EXAMPLE.COM", "example.com"),  # lowercased
+        ("example.com", "example.com"),  # No scheme, used as-is
+        ("example.com:8443", "example.com"),  # bare host + port
         ("", ""),  # Empty domain
     ])
     @patch('domain_profiler.profiler.DNSCheck')
-    def test_domain_parsing_variations(self, mock_dns_check, domain, expected_netloc):
-        """Test various domain input formats."""
+    def test_domain_parsing_variations(self, mock_dns_check, domain, expected_host):
+        """Test various domain input formats normalize to a bare hostname."""
         mock_dns_instance = Mock()
         mock_dns_check.return_value = mock_dns_instance
-        mock_dns_instance.get_report.return_value = {'domain': expected_netloc}
+        mock_dns_instance.get_report.return_value = {'domain': expected_host}
 
         profiler = Profiler()
         profiler.run(domain, live=False)
 
-        if expected_netloc:
-            mock_dns_instance.get_report.assert_called_once_with(domain=expected_netloc)
-        else:
-            mock_dns_instance.get_report.assert_called_once_with(domain=domain) 
+        mock_dns_instance.get_report.assert_called_once_with(domain=expected_host) 

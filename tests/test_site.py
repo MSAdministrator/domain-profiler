@@ -429,9 +429,97 @@ class TestUrl:
     def test_url_inherits_from_base(self):
         """Test that Url inherits from Base class."""
         from domain_profiler.base import Base
-        
+
         with patch('domain_profiler.site.HTMLSession'):
             with patch('domain_profiler.site.whois.whois', return_value={}):
                 url_instance = Url("https://example.com")
-        
-        assert isinstance(url_instance, Base) 
+
+        assert isinstance(url_instance, Base)
+
+    def test_has_suspicious_forms_scans_all_forms(self):
+        """A suspicious form after a benign one is still detected."""
+        with patch('domain_profiler.site.HTMLSession'):
+            with patch('domain_profiler.site.whois.whois', return_value={}):
+                url_instance = Url("https://example.com")
+                mock_response = Mock()
+                # First form is benign; second has an empty action (suspicious).
+                mock_response.content = (
+                    b'<form action="https://example.com/search"></form>'
+                    b'<form action=""></form>'
+                )
+                url_instance.response = mock_response
+
+        assert url_instance.has_suspicious_forms is True
+
+    def test_is_abnormal_url_uses_substring_not_regex(self):
+        """A domain name with regex metachars is matched literally."""
+        with patch('domain_profiler.site.HTMLSession'):
+            with patch('domain_profiler.site.whois.whois',
+                       return_value={'domain_name': 'example.com'}):
+                # "." is a regex any-char; a literal check must reject this URL.
+                url_instance = Url("https://exampleXcom.evil.net")
+
+        assert url_instance.is_abnormal_url is True
+
+    @patch('re.search')
+    def test_has_popup_window_pattern_grouped(self, mock_search):
+        """The popup regex groups its alternatives (open|alert|confirm|prompt)."""
+        mock_search.return_value = None
+
+        with patch('domain_profiler.site.HTMLSession'):
+            with patch('domain_profiler.site.whois.whois', return_value={}):
+                url_instance = Url("https://example.com")
+                mock_response = Mock()
+                mock_response.ok = True
+                mock_script = Mock()
+                mock_script.text = "window.open('x')"
+                mock_response.html.find.return_value = [mock_script]
+                mock_response.html.render.return_value = None
+                url_instance.response = mock_response
+
+        url_instance.has_popup_window
+        pattern = mock_search.call_args[0][0]
+        assert pattern == r'(open|alert|confirm|prompt)\('
+
+    def test_to_json_whois_is_json_serializable(self):
+        """to_json output (including whois datetimes) survives json.dumps."""
+        import json
+        from datetime import datetime
+
+        whois_data = {
+            'domain_name': ['EXAMPLE.COM'],
+            'creation_date': [datetime(1995, 8, 14)],
+            'updated_date': datetime(2023, 1, 1),
+        }
+        with patch('domain_profiler.site.HTMLSession'):
+            with patch('domain_profiler.site.whois.whois', return_value=whois_data):
+                url_instance = Url("https://example.com")
+                url_instance.response = None
+
+        result = url_instance.to_json()
+        # Should not raise TypeError on datetime objects.
+        json.dumps(result)
+        assert result['whois']['updated_date'] == '2023-01-01T00:00:00'
+
+    @patch('domain_profiler.site.pendulum.instance')
+    def test_domain_age_handles_list_creation_date(self, mock_pendulum_instance):
+        """A list-valued creation_date is coerced to a datetime, not crashed."""
+        from datetime import datetime
+        mock_date = Mock()
+        mock_diff = Mock()
+        mock_diff.in_minutes.return_value = 1
+        mock_diff.in_hours.return_value = 1
+        mock_diff.in_days.return_value = 1
+        mock_diff.in_words.return_value = "1 day ago"
+        mock_date.diff.return_value = mock_diff
+        mock_pendulum_instance.return_value = mock_date
+
+        whois_data = {'creation_date': [datetime(1995, 8, 14), datetime(1996, 1, 1)]}
+        with patch('domain_profiler.site.HTMLSession'):
+            with patch('domain_profiler.site.whois.whois', return_value=whois_data):
+                url_instance = Url("https://example.com")
+
+        result = url_instance.domain_age()
+        # The most recent datetime is used; result is populated (not {}).
+        assert result['in_days'] == 1
+        mock_pendulum_instance.assert_called_once_with(datetime(1996, 1, 1))
