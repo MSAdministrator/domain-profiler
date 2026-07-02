@@ -172,30 +172,67 @@ class TestProfiler:
         with pytest.raises(Exception):
             profiler.run(sample_domain, live=True)
 
+    @patch('domain_profiler.profiler.EmailAuth')
+    @patch('domain_profiler.profiler.DNSCheck')
+    def test_run_with_email_analysis(self, mock_dns_check, mock_email_auth, sample_domain):
+        """Test that email=True attaches an email_auth section."""
+        mock_dns_instance = Mock()
+        mock_dns_check.return_value = mock_dns_instance
+        mock_dns_instance.get_report.return_value = {'domain': sample_domain}
+
+        mock_email_instance = Mock()
+        mock_email_auth.return_value = mock_email_instance
+        mock_email_instance.get_report.return_value = {'spf': None, 'dmarc': None}
+
+        profiler = Profiler()
+        result = profiler.run(sample_domain, email=True)
+
+        mock_email_instance.get_report.assert_called_once_with(
+            domain=sample_domain, dkim_selector=None
+        )
+        assert result['email_auth'] == {'spf': None, 'dmarc': None}
+
+    @patch('domain_profiler.profiler.EmailAuth')
+    def test_email_command_normalizes_and_delegates(self, mock_email_auth):
+        """Test the standalone email() command normalizes input and delegates."""
+        mock_email_instance = Mock()
+        mock_email_auth.return_value = mock_email_instance
+        mock_email_instance.get_report.return_value = {'domain': 'example.com'}
+
+        profiler = Profiler()
+        result = profiler.email("https://example.com:8443/path", dkim_selector="s1")
+
+        mock_email_instance.get_report.assert_called_once_with(
+            domain="example.com", dkim_selector="s1"
+        )
+        assert result['domain'] == 'example.com'
+
     def test_profiler_inherits_from_base(self):
         """Test that Profiler inherits from Base class."""
         from domain_profiler.base import Base
         profiler = Profiler()
         assert isinstance(profiler, Base)
 
-    @pytest.mark.parametrize("domain,expected_netloc", [
+    @pytest.mark.parametrize("domain,expected_host", [
         ("https://example.com", "example.com"),
         ("http://sub.example.com", "sub.example.com"),
-        ("https://example.com:8080", "example.com:8080"),
-        ("example.com", "example.com"),  # No scheme, should use as-is
+        ("https://example.com:8080", "example.com"),  # port stripped
+        ("https://user@example.com", "example.com"),  # userinfo stripped
+        ("https://EXAMPLE.COM", "example.com"),  # lowercased
+        ("example.com", "example.com"),  # No scheme, used as-is
+        ("example.com:8443", "example.com"),  # bare host + port
+        ("[2001:db8::1]:443", "2001:db8::1"),  # bare IPv6 literal + port
+        ("https://[2001:db8::1]:443", "2001:db8::1"),  # IPv6 literal in a URL
         ("", ""),  # Empty domain
     ])
     @patch('domain_profiler.profiler.DNSCheck')
-    def test_domain_parsing_variations(self, mock_dns_check, domain, expected_netloc):
-        """Test various domain input formats."""
+    def test_domain_parsing_variations(self, mock_dns_check, domain, expected_host):
+        """Test various domain input formats normalize to a bare hostname."""
         mock_dns_instance = Mock()
         mock_dns_check.return_value = mock_dns_instance
-        mock_dns_instance.get_report.return_value = {'domain': expected_netloc}
+        mock_dns_instance.get_report.return_value = {'domain': expected_host}
 
         profiler = Profiler()
         profiler.run(domain, live=False)
 
-        if expected_netloc:
-            mock_dns_instance.get_report.assert_called_once_with(domain=expected_netloc)
-        else:
-            mock_dns_instance.get_report.assert_called_once_with(domain=domain) 
+        mock_dns_instance.get_report.assert_called_once_with(domain=expected_host) 

@@ -15,76 +15,30 @@ from domain_profiler.base import Base
 class DNSCheck(Base):
     """DNS checking and analysis class."""
 
+    # The record types worth querying for a domain profile. The full IANA
+    # registry contains ~70 types, but most are obsolete (MD, MF), meta/transfer
+    # types (AXFR, IXFR, OPT, ANY) that a recursive resolver will refuse, or
+    # DNSSEC internals with little profiling value. Querying only the useful
+    # types keeps a lookup to a handful of fast queries instead of ~70 that
+    # mostly time out.
     DNS_RECORDS: List[str] = [
-        'NONE',
         'A',
-        'NS',
-        'MD',
-        'MF',
-        'CNAME',
-        'SOA',
-        'MB',
-        'MG',
-        'MR',
-        'NULL',
-        'WKS',
-        'PTR',
-        'HINFO',
-        'MINFO',
+        'AAAA',
         'MX',
         'TXT',
-        'RP',
-        'AFSDB',
-        'X25',
-        'ISDN',
-        'RT',
-        'NSAP',
-        'NSAP-PTR',
-        'SIG',
-        'KEY',
-        'PX',
-        'GPOS',
-        'AAAA',
-        'LOC',
-        'NXT',
+        'CNAME',
+        'NS',
+        'SOA',
         'SRV',
-        'NAPTR',
-        'KX',
-        'CERT',
-        'A6',
-        'DNAME',
-        'OPT',
-        'APL',
-        'DS',
-        'SSHFP',
-        'IPSECKEY',
-        'RRSIG',
-        'NSEC',
-        'DNSKEY',
-        'DHCID',
-        'NSEC3',
-        'NSEC3PARAM',
-        'TLSA',
-        'HIP',
-        'CDS',
-        'CDNSKEY',
-        'CSYNC',
-        'SPF',
-        'UNSPEC',
-        'EUI48',
-        'EUI64',
-        'TKEY',
-        'TSIG',
-        'IXFR',
-        'AXFR',
-        'MAILB',
-        'MAILA',
-        'ANY',
-        'URI',
         'CAA',
-        'TA',
-        'DLV',
+        'PTR',
+        'NAPTR',
+        'DNSKEY',
     ]
+
+    # Per-query timeout (seconds) so a single unresponsive record type can't
+    # stall the whole report.
+    QUERY_TIMEOUT: float = 5.0
 
     def _is_valid_ip(self, ip_string: str) -> bool:
         try:
@@ -94,10 +48,24 @@ class DNSCheck(Base):
             return False
 
     def _parse_txt_record(self, record: str) -> List[str]:
+        """Extract IPs from an SPF-style TXT record.
+
+        SPF records are whitespace-separated mechanisms (e.g.
+        ``v=spf1 ip4:1.2.3.4 ip4:5.6.7.8 -all``). Splitting only on ``ip4:``
+        left the trailing tokens attached to each address (``"5.6.7.8 -all"``),
+        which then failed IP validation and were dropped. Tokenize on
+        whitespace first, then strip the ``ip4:``/``ip6:`` prefix from each
+        token before validating.
+        """
         return_list: List[str] = []
-        for address in record.split("ip4:"):
-            if self._is_valid_ip(address.strip()):
-                return_list.append(address.strip())
+        for token in record.replace('"', ' ').split():
+            candidate = token
+            for prefix in ("ip4:", "ip6:"):
+                if candidate.startswith(prefix):
+                    candidate = candidate[len(prefix):]
+                    break
+            if self._is_valid_ip(candidate):
+                return_list.append(candidate)
         return return_list
 
     def get_dns_info(self, domain: str) -> Dict[str, List[str]]:
@@ -112,7 +80,9 @@ class DNSCheck(Base):
         return_dict: Dict[str, List[str]] = {}
         for item in self.DNS_RECORDS:
             try:
-                answers = resolver.query(domain, item)
+                answers = resolver.query(
+                    domain, item, lifetime=self.QUERY_TIMEOUT
+                )
                 if answers:
                     if item not in return_dict:
                         return_dict[item] = []
@@ -190,8 +160,7 @@ class DNSCheck(Base):
         """
         try:
             data = socket.gethostbyaddr(ip_address)
-            host = repr(data[0])
-            return host
+            return data[0]
         except Exception:
             return ""
 
@@ -204,12 +173,7 @@ class DNSCheck(Base):
         Returns:
             str: The FQDN assocaited with a given IP.
         """
-        try:
-            data = socket.gethostbyaddr(ip_address)
-            host = repr(data[0])
-            return host
-        except Exception:
-            return ""
+        return self.get_host(ip_address)
 
     def get_aliases(self, domain: str) -> List[str]:
         """This method returns an array containing a list of aliases for the given domain
@@ -253,7 +217,9 @@ class DNSCheck(Base):
         ip_list: List[str] = []
         ip_list.append(self.get_ip(domain=domain))
         ip_list.extend(self.get_ip_x(domain=domain))
-        ip_list = list(set(ip_list))
+        # Drop failed lookups (get_ip returns "" on failure) so we don't emit a
+        # bogus empty-string "IP" entry and run host/reverse lookups against it.
+        ip_list = [ip for ip in set(ip_list) if ip]
         ip_dict: Dict[str, Dict[str, Union[str, Dict[str, List[str]]]]] = {}
         for ip in ip_list:
             if ip not in ip_dict:

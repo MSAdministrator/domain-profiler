@@ -2,8 +2,9 @@
 
 import re
 import codecs
+from datetime import date
 from typing import Any, Dict, List, Optional, Union
-from urllib.parse import urlparse, urlunparse, ParseResult
+from urllib.parse import urlparse, urlunparse, urljoin, ParseResult
 
 import mmh3
 import whois
@@ -42,9 +43,13 @@ class Url(Base):
             self.response = self.session.get(self._original_url, verify=False, timeout=5)
         except Exception:
             try:
+                # Retry over http. Rebuild only the scheme via urlunparse so we
+                # don't corrupt hosts/paths that happen to contain "https"
+                # (e.g. https://httpsecure.example) the way str.replace would.
+                http_url = urlunparse(self._parsed_url._replace(scheme='http'))
                 self.response = self.session.get(
-                    self._original_url.replace('https', 'http'), 
-                    verify=False, 
+                    http_url,
+                    verify=False,
                     timeout=5
                 )
             except Exception:
@@ -64,15 +69,29 @@ class Url(Base):
                 return_list.append(response.url)
         return return_list
 
+    @staticmethod
+    def _coerce_whois_date(value: Any) -> Any:
+        """Return a single datetime from a WHOIS date field.
+
+        python-whois returns date fields (creation_date, updated_date, ...) as
+        either a single datetime or a list of datetimes depending on the
+        registrar. Callers assuming one shape crash (and silently return {})
+        on the other. Normalize to the most recent datetime here.
+        """
+        if isinstance(value, (list, tuple)):
+            return value[-1] if value else None
+        return value
+
     def domain_registration_length(self) -> Dict[str, Union[int, str]]:
         """Calculate domain registration length from WHOIS data.
-        
+
         Returns:
             Dictionary with registration length in various formats
         """
         try:
             if self._whois and self._whois.get('updated_date'):
-                updated_date = pendulum.instance(self._whois['updated_date'][-1])
+                updated = self._coerce_whois_date(self._whois['updated_date'])
+                updated_date = pendulum.instance(updated)
                 difference = updated_date.diff()
                 return {
                     'in_minutes': difference.in_minutes(),
@@ -97,14 +116,19 @@ class Url(Base):
                 for item in results:
                     if item.attrs.get('rel') and 'icon' in item.attrs['rel']:
                         try:
-                            response = self.session.get(item['href'])
+                            # Favicon hrefs are commonly relative ("/favicon.ico").
+                            # Resolve against the fetched URL so session.get gets an
+                            # absolute URL instead of raising MissingSchema.
+                            base = self.response.url if self.response else self._original_url
+                            href = urljoin(base, item['href'])
+                            response = self.session.get(href)
                             favicon = codecs.encode(response.content, 'base64')
                             return_list.append({
-                                'href': item['href'],
+                                'href': href,
                                 'hash': mmh3.hash(favicon)
                             })
                         except Exception:
-                            pass     
+                            pass
         return return_list
 
     def domain_age(self) -> Dict[str, Union[int, str]]:
@@ -115,7 +139,8 @@ class Url(Base):
         """
         try:
             if self._whois and self._whois.get('creation_date'):
-                creation_date = pendulum.instance(self._whois['creation_date'])
+                created = self._coerce_whois_date(self._whois['creation_date'])
+                creation_date = pendulum.instance(created)
                 difference = creation_date.diff()
                 return {
                     'in_minutes': difference.in_minutes(),
@@ -127,9 +152,25 @@ class Url(Base):
             pass
         return {}
 
+    @classmethod
+    def _jsonify(cls, value: Any) -> Any:
+        """Recursively convert WHOIS data into JSON-serializable values.
+
+        python-whois returns datetime objects (and nested lists/dicts of them),
+        which json.dumps cannot serialize. Convert datetimes to ISO strings so
+        the dict honors this method's JSON-serializable contract.
+        """
+        if isinstance(value, date):  # datetime is a subclass of date
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {k: cls._jsonify(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [cls._jsonify(v) for v in value]
+        return value
+
     def to_json(self) -> Dict[str, Any]:
         """Convert URL analysis to JSON-serializable dictionary.
-        
+
         Returns:
             Dictionary containing all analysis results
         """
@@ -151,7 +192,7 @@ class Url(Base):
             'has_popup_window': self.has_popup_window,
             'has_suspicious_forms': self.has_suspicious_forms,
             'using_sub_domains': self.using_sub_domains,
-            'whois': self._whois,
+            'whois': self._jsonify(self._whois),
             'domain_age': self.domain_age(),
             'domain_registration_length': self.domain_registration_length(),
             'favicons': self.get_favicons(),
@@ -283,13 +324,19 @@ class Url(Base):
             try:
                 soup = BeautifulSoup(self.response.content, 'html.parser')
                 forms = soup.find_all('form')
+                found_form = False
                 for form in forms:
                     if isinstance(form, Tag):
+                        found_form = True
                         action = form.get('action')
+                        # Any suspicious form makes the page suspicious, so keep
+                        # scanning until we find one instead of deciding on the
+                        # first form (which let a benign first form mask a later
+                        # phishing form).
                         if action == "" or action is None or action == "about:blank":
                             return True
-                        else:
-                            return False
+                if found_form:
+                    return False
             except Exception:
                 pass
         return None
@@ -309,7 +356,10 @@ class Url(Base):
                 else:
                     domain_name = domain_names
                 
-                if not re.search(domain_name.lower(), self._original_url.lower()):
+                # Plain substring check: the WHOIS domain name is data, not a
+                # pattern. Using it as a regex let "." match any character
+                # (false negatives) and could raise re.error on metacharacters.
+                if domain_name.lower() not in self._original_url.lower():
                     return True
                 else:
                     return False
@@ -352,7 +402,11 @@ class Url(Base):
             try:
                 self.response.html.render()
                 for tag in self.response.html.find('script'):
-                    match_obj = re.search(r'.*open\(|alert\(|confirm\(|prompt\(.*', tag.text)
+                    # Group the alternatives so the pattern matches any of the
+                    # popup calls. Without the group, top-level | made this
+                    # ".*open(" OR "alert(" OR "confirm(" OR "prompt(.*", which
+                    # matched benign scripts containing e.g. "alert(" anywhere.
+                    match_obj = re.search(r'(open|alert|confirm|prompt)\(', tag.text)
                     if match_obj:
                         return True
             except Exception:
