@@ -356,10 +356,104 @@ class TestDNSCheck:
         mock_query.return_value = [mock_response]
 
         dns_check = DNSCheck()
-        
+
         with patch.object(dns_check, 'DNS_RECORDS', ['MX']):
             result = dns_check.get_dns_info(sample_domain)
 
         assert 'MX' in result
         assert "value1" in result['MX']
-        assert "value2" in result['MX'] 
+        assert "value2" in result['MX']
+
+
+class TestIsIpInCidr:
+    """Cover is_ip_in_cidr — previously had no test at all (4 no-cov mutants)."""
+
+    def test_ipv4_in_range(self):
+        assert DNSCheck().is_ip_in_cidr("10.0.0.5", "10.0.0.0/24") is True
+
+    def test_ipv4_out_of_range(self):
+        assert DNSCheck().is_ip_in_cidr("10.0.1.5", "10.0.0.0/24") is False
+
+    def test_ipv6_in_range(self):
+        assert DNSCheck().is_ip_in_cidr("2001:db8::1", "2001:db8::/32") is True
+
+    def test_invalid_ip_returns_false(self):
+        assert DNSCheck().is_ip_in_cidr("not-an-ip", "10.0.0.0/24") is False
+
+    def test_invalid_cidr_returns_false(self):
+        assert DNSCheck().is_ip_in_cidr("10.0.0.5", "garbage") is False
+
+    def test_boundary_addresses(self):
+        # Network and broadcast addresses are both within the range.
+        assert DNSCheck().is_ip_in_cidr("10.0.0.0", "10.0.0.0/24") is True
+        assert DNSCheck().is_ip_in_cidr("10.0.0.255", "10.0.0.0/24") is True
+
+
+class TestGetDnsInfoTxtParsing:
+    """Exercise the real TXT branch of get_dns_info (kills TXT-key + parse mutants)."""
+
+    @patch('domain_profiler.dns.resolver.query')
+    def test_txt_record_ips_extracted_into_result(self, mock_query, sample_domain):
+        resp = Mock()
+        resp.to_text.return_value = '"v=spf1 ip4:1.2.3.4 ip4:5.6.7.8 -all"'
+        mock_query.return_value = [resp]
+        dns_check = DNSCheck()
+        with patch.object(dns_check, 'DNS_RECORDS', ['TXT']):
+            result = dns_check.get_dns_info(sample_domain)
+        # The "TXT" key must be used verbatim and both ip4 values extracted.
+        assert result["TXT"] == ["1.2.3.4", "5.6.7.8"]
+
+    @patch('domain_profiler.dns.resolver.query')
+    def test_txt_continues_past_first_record(self, mock_query, sample_domain):
+        """Multiple TXT rdata: a later record's IPs are still collected.
+
+        Kills the `continue`->`break` mutant — `break` would stop after the
+        first (IP-less) TXT record and drop the second record's IPs.
+        """
+        r1 = Mock(); r1.to_text.return_value = '"v=verification=abc"'  # no IPs
+        r2 = Mock(); r2.to_text.return_value = '"v=spf1 ip4:9.9.9.9 -all"'
+        mock_query.return_value = [r1, r2]
+        dns_check = DNSCheck()
+        with patch.object(dns_check, 'DNS_RECORDS', ['TXT']):
+            result = dns_check.get_dns_info(sample_domain)
+        assert result["TXT"] == ["9.9.9.9"]
+
+
+class TestParseTxtRecordReal:
+    """Assert _parse_txt_record's quote/whitespace handling (kills replace mutants)."""
+
+    def test_quotes_stripped_and_split_on_whitespace(self):
+        dns_check = DNSCheck()
+        # Leading/trailing quotes must be turned into spaces so ip4:1.2.3.4 parses.
+        assert dns_check._parse_txt_record('"ip4:1.2.3.4"') == ["1.2.3.4"]
+
+    def test_quote_between_tokens_does_not_merge_ips(self):
+        dns_check = DNSCheck()
+        # If '"' were replaced with '' instead of ' ', these would merge/fail.
+        assert dns_check._parse_txt_record('ip4:1.2.3.4"ip4:5.6.7.8') == ["1.2.3.4", "5.6.7.8"]
+
+
+class TestGetReportArgWiring:
+    """Assert get_report passes the real domain/ip through (kills =None mutants)."""
+
+    def test_report_passes_domain_and_ips_through(self, sample_domain):
+        dns_check = DNSCheck()
+        with patch.object(DNSCheck, 'get_ip', return_value="1.2.3.4") as m_ip, \
+             patch.object(DNSCheck, 'get_ip_x', return_value=[]) as m_ipx, \
+             patch.object(DNSCheck, 'get_aliases', return_value=[]) as m_al, \
+             patch.object(DNSCheck, 'get_dns_info', return_value={}) as m_dns, \
+             patch.object(DNSCheck, 'get_host', return_value="h") as m_host, \
+             patch.object(DNSCheck, 'get_fqdn', return_value="f") as m_fqdn, \
+             patch.object(DNSCheck, 'get_reversename', return_value={}) as m_rev:
+            result = dns_check.get_report(sample_domain)
+
+        # domain flows to the domain-keyed lookups...
+        m_ip.assert_called_once_with(domain=sample_domain)
+        m_ipx.assert_called_once_with(domain=sample_domain)
+        m_al.assert_called_once_with(domain=sample_domain)
+        m_dns.assert_called_once_with(domain=sample_domain)
+        # ...and the resolved IP (not None) flows to the ip-keyed lookups.
+        m_host.assert_called_once_with(ip_address="1.2.3.4")
+        m_fqdn.assert_called_once_with(ip_address="1.2.3.4")
+        m_rev.assert_called_once_with(ip_address="1.2.3.4")
+        assert result["ips"]["1.2.3.4"]["host"] == "h"
