@@ -130,10 +130,6 @@ class TestParseDomainStrictFields:
 class TestRawRdapHttp:
     """Cover the raw ip/domain/autnum HTTP methods (24 no-cov mutants)."""
 
-    def _mock_request(self, payload=None):
-        resp = patch("domain_profiler.rdap.requests.request")
-        return resp
-
     def test_ip_calls_get_with_url_and_timeout(self):
         with patch("domain_profiler.rdap.requests.request") as mock_req:
             mock_req.return_value.json.return_value = {"ok": 1}
