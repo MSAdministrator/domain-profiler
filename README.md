@@ -40,6 +40,14 @@ A comprehensive Python CLI tool and package for domain analysis and profiling. G
 - **Subdomain-takeover & wildcard detection** — detects wildcard DNS (baseline)
   and dangling CNAMEs pointing at unprovisioned takeover-prone providers
 
+### 📧 Email Authentication (`--email`)
+- **SPF** — record lookup with `include`/`redirect` tree expansion and a flattened
+  view of authorized senders
+- **DKIM** — probes common (and any user-supplied) selectors for signing keys
+- **DMARC** — policy, alignment, and reporting-address parsing
+- **BIMI** — brand-indicator record discovery
+- **MX** — mail-exchanger records backing the domain
+
 ### 🎭 Typosquat / Homoglyph Detection (`typosquat`)
 - Scores a candidate domain against a known **brand** — edit-distance similarity,
   homoglyph normalization (Cyrillic/Greek/digit look-alikes), and IDN/punycode
@@ -74,11 +82,20 @@ domain-profiler run example.com
 # Full analysis including website profiling
 domain-profiler run example.com --live
 
+# Include email-authentication analysis (SPF, DKIM, DMARC, BIMI, MX)
+domain-profiler run example.com --email
+
 # Include security analysis (DNSSEC, CAA, RDAP, TLS, takeover)
 domain-profiler run example.com --security
 
 # Security analysis only
 domain-profiler security example.com
+
+# Email-authentication analysis only
+domain-profiler email example.com
+
+# Probe a specific DKIM selector first
+domain-profiler email example.com --dkim-selector google
 
 # Inspect just the TLS certificate
 domain-profiler tls example.com
@@ -103,6 +120,11 @@ dns_data = profiler.run("example.com")
 # Full analysis with website profiling
 full_data = profiler.run("example.com", live=True)
 
+# Email-authentication analysis (SPF / DKIM / DMARC / BIMI / MX)
+email_data = profiler.run("example.com", email=True)
+# ...or standalone:
+email_only = profiler.email("example.com")
+
 # Security analysis (DNSSEC / CAA / RDAP / TLS / subdomain-takeover)
 security_data = profiler.run("example.com", security=True)
 # ...or standalone:
@@ -118,7 +140,7 @@ print(full_data)
 The CLI is built using Google Fire, providing an intuitive interface:
 
 ```bash
-domain-profiler run DOMAIN [--live] [--email] [--security]
+domain-profiler run DOMAIN [--live] [--email] [--dkim-selector SELECTOR] [--security]
 ```
 
 #### Parameters
@@ -126,6 +148,7 @@ domain-profiler run DOMAIN [--live] [--email] [--security]
 - `DOMAIN`: The domain to analyze (required)
 - `--live`: Enable website analysis in addition to DNS (optional, default: False)
 - `--email`: Enable email-authentication analysis — SPF/DKIM/DMARC/BIMI/MX (optional, default: False)
+- `--dkim-selector`: Extra DKIM selector to probe first (optional)
 - `--security`: Enable security analysis — DNSSEC/CAA/RDAP/TLS/subdomain-takeover (optional, default: False)
 
 #### Examples
@@ -180,7 +203,8 @@ When using `--live` flag, additional website data is included:
 
 The tool uses several robust Python libraries:
 
-- **dnspython**: DNS resolution and analysis
+- **dnspython**: DNS resolution and analysis (including DNSSEC/CAA/email records)
+- **cryptography**: TLS certificate parsing and inspection
 - **requests-html**: Website content analysis with JavaScript support
 - **beautifulsoup4**: HTML parsing and analysis
 - **python-whois**: Domain registration information
@@ -213,10 +237,17 @@ domain-profiler/
 │   ├── __init__.py
 │   ├── __main__.py          # CLI entry point
 │   ├── profiler.py          # Main profiler class
-│   ├── dns.py              # DNS analysis functionality
-│   ├── site.py             # Website analysis functionality
-│   ├── base.py             # Base classes and utilities
-│   └── logger.py           # Logging configuration
+│   ├── dns.py               # DNS analysis functionality
+│   ├── site.py              # Website analysis functionality
+│   ├── email_auth.py        # SPF/DKIM/DMARC/BIMI/MX analysis
+│   ├── dnssec.py            # DNSSEC chain-of-trust validation
+│   ├── caa.py               # CAA policy analysis
+│   ├── rdap.py              # RDAP registration data
+│   ├── tls.py               # TLS certificate inspection
+│   ├── takeover.py          # Subdomain-takeover & wildcard detection
+│   ├── typosquat.py         # Typosquat / homoglyph detection
+│   ├── base.py              # Base classes and utilities
+│   └── logger.py            # Logging configuration
 ├── pyproject.toml          # Project configuration
 ├── README.md
 └── uv.lock                # Dependency lock file
@@ -246,6 +277,8 @@ pytest -m "not slow"    # Skip slow tests
 pytest tests/test_profiler.py
 pytest tests/test_dns.py
 pytest tests/test_site.py
+pytest tests/test_email_auth.py
+pytest tests/test_tls.py
 
 # Run with verbose output
 pytest -v
@@ -261,6 +294,13 @@ The test suite includes comprehensive coverage of all modules:
 - **`tests/test_profiler.py`**: Main profiler functionality, CLI integration
 - **`tests/test_dns.py`**: DNS resolution, record queries, IP lookups
 - **`tests/test_site.py`**: Website analysis, security indicators, WHOIS data
+- **`tests/test_email_auth.py`**: SPF/DKIM/DMARC/BIMI/MX resolution and parsing
+- **`tests/test_dnssec.py`**: DNSSEC chain-of-trust validation
+- **`tests/test_caa.py`**: CAA policy analysis
+- **`tests/test_rdap.py`**: RDAP registration-data parsing
+- **`tests/test_tls.py`**: TLS certificate inspection and security flags
+- **`tests/test_takeover.py`**: Wildcard DNS and dangling-CNAME detection
+- **`tests/test_typosquat.py`**: Typosquat / homoglyph scoring
 - **`tests/test_cli.py`**: Command-line interface, Fire integration
 - **`tests/test_base.py`**: Base classes, inheritance, extensions
 - **`tests/test_logger.py`**: Logging system, formatters, metaclass
@@ -316,7 +356,8 @@ The tool is designed to be resilient:
 
 ## Testing
 
-The project includes a comprehensive test suite with **149 tests** and **85% code coverage**.
+The project includes a comprehensive test suite with **300+ tests** spanning DNS,
+website, email-authentication, and security analysis, hardened with mutation testing.
 
 ### Quick Testing
 
@@ -333,13 +374,22 @@ make test-fast
 
 ### Test Results Summary
 
-- ✅ **149 tests passing**
-- 📊 **85% overall coverage**
-- 🎯 **100% coverage** on core modules (CLI, base, logger, profiler)
+- ✅ **300+ tests passing** across 13 test modules
+- 🎯 **Dedicated suites** for every analysis module (DNS, site, email, DNSSEC, CAA, RDAP, TLS, takeover, typosquat)
+- 🧬 **Mutation-tested** to verify tests actually catch regressions
 - 🔧 **Comprehensive mocking** of all external dependencies
 - 🚀 **No real network calls** during testing
 
 ## Changelog
+
+### Unreleased
+- Email-authentication analysis (`--email` / `email`): SPF (with tree expansion and
+  flattening), DKIM selector probing, DMARC, BIMI, and MX
+- Tier 1 DNS-layer security (`--security` / `security`): DNSSEC chain-of-trust
+  validation, CAA policy analysis, and RDAP registration data
+- Tier 2 security signals: TLS certificate inspection (`tls`), subdomain-takeover
+  and wildcard detection (`takeover`), and typosquat/homoglyph scoring (`typosquat`)
+- Test suite expanded to 300+ tests and hardened with mutation testing
 
 ### v0.1.0
 - Initial release
