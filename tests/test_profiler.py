@@ -235,6 +235,16 @@ class TestProfiler:
         assert result['security']['caa'] == {'present': True}
         assert result['security']['rdap'] == {'registrar': 'X'}
 
+    @patch('domain_profiler.profiler.RDAP')
+    def test_whois_command_normalizes_and_delegates(self, mock_rdap):
+        mock_rdap.return_value.whois_domain.return_value = {'source': 'whois'}
+
+        profiler = Profiler()
+        result = profiler.whois('https://EXAMPLE.com:8443/path')
+
+        mock_rdap.return_value.whois_domain.assert_called_once_with('example.com')
+        assert result == {'source': 'whois'}
+
     @patch('domain_profiler.profiler.Takeover')
     @patch('domain_profiler.profiler.TLSInspector')
     @patch('domain_profiler.profiler.RDAP')
@@ -247,6 +257,7 @@ class TestProfiler:
         mock_dnssec.return_value.validate.return_value = {'status': 'insecure'}
         mock_caa.return_value.analyze.return_value = {}
         mock_rdap.return_value.report.return_value = {}
+        mock_rdap.return_value.whois_domain.return_value = {'source': 'whois'}
         mock_tls.return_value.inspect.return_value = {}
         mock_takeover.return_value.report.return_value = {}
 
@@ -256,9 +267,10 @@ class TestProfiler:
         mock_dnssec.return_value.validate.assert_called_once_with("example.com")
         mock_caa.return_value.analyze.assert_called_once_with("example.com")
         mock_rdap.return_value.report.assert_called_once_with("example.com")
+        mock_rdap.return_value.whois_domain.assert_called_once_with("example.com")
         mock_tls.return_value.inspect.assert_called_once_with("example.com")
         mock_takeover.return_value.report.assert_called_once_with("example.com")
-        assert set(result) == {"dnssec", "caa", "rdap", "tls", "takeover"}
+        assert set(result) == {"dnssec", "caa", "rdap", "tls", "takeover", "whois"}
 
     @patch('domain_profiler.profiler.TLSInspector')
     def test_tls_command_normalizes_and_delegates(self, mock_tls):

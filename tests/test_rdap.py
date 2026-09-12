@@ -2,6 +2,8 @@
 
 from unittest.mock import patch
 
+import requests
+
 from domain_profiler.rdap import RDAP
 
 
@@ -82,6 +84,60 @@ class TestRDAPParsing:
         assert result["domain"] == "google.com"
         assert result["error"].startswith("RDAP parse failed")
 
+    def test_report_handles_http_404_with_friendly_message(self):
+        response = requests.Response()
+        response.status_code = 404
+        response.url = "https://www.rdap.net/domain/example.it"
+        err = requests.HTTPError("404 Client Error", response=response)
+        with patch.object(RDAP, "domain", side_effect=err):
+            result = RDAP().report("example.it")
+        assert result["domain"] == "example.it"
+        assert "not found" in result["error"].lower()
+        assert "https://www.rdap.net/domain/example.it" in result["error"]
+
+    def test_report_handles_http_non_404_status(self):
+        response = requests.Response()
+        response.status_code = 500
+        err = requests.HTTPError("500 Server Error", response=response)
+        with patch.object(RDAP, "domain", side_effect=err):
+            result = RDAP().report("example.com")
+        assert result["domain"] == "example.com"
+        assert result["error"].startswith("RDAP HTTP error (500)")
+
+    def test_parse_whois_domain_normalizes_fields(self):
+        raw = {
+            "domain_name": ["EXAMPLE.IT"],
+            "registrar": ["Registrar SpA"],
+            "creation_date": "2020-01-01T00:00:00Z",
+            "expiration_date": None,
+            "updated_date": ["2024-01-01T00:00:00Z"],
+            "status": "ok",
+            "name_servers": {"NS2.EXAMPLE.IT", "NS1.EXAMPLE.IT"},
+        }
+        result = RDAP().parse_whois_domain(raw, "example.it")
+        assert result == {
+            "domain": "EXAMPLE.IT",
+            "handle": None,
+            "registrar": "Registrar SpA",
+            "registrar_iana_id": None,
+            "registered": "2020-01-01T00:00:00Z",
+            "expires": None,
+            "last_changed": "2024-01-01T00:00:00Z",
+            "statuses": ["ok"],
+            "nameservers": ["NS1.EXAMPLE.IT", "NS2.EXAMPLE.IT"],
+            "dnssec_delegated": None,
+            "error": None,
+            "source": "whois",
+        }
+
+    def test_parse_whois_domain_splits_multiline_nameservers(self):
+        raw = {
+            "domain_name": "example.it",
+            "name_servers": "ns1.example.it\nns2.example.it",
+        }
+        result = RDAP().parse_whois_domain(raw, "example.it")
+        assert result["nameservers"] == ["ns1.example.it", "ns2.example.it"]
+
     def test_vcard_field_org_fallback(self):
         raw = dict(
             SAMPLE_RDAP,
@@ -150,6 +206,56 @@ class TestRawRdapHttp:
         assert kwargs["timeout"] == RDAP.TIMEOUT
         assert out == {"ok": 2}
 
+    def test_domain_uses_tld_specific_server_when_configured(self):
+        with patch("domain_profiler.rdap.RDAP._is_host_resolvable", return_value=True):
+            with patch("domain_profiler.rdap.requests.request") as mock_req:
+                mock_req.return_value.json.return_value = {"ok": 2}
+                out = RDAP().domain("example.it")
+        args, kwargs = mock_req.call_args
+        assert args[0] == "GET"
+        assert kwargs["url"] == "https://rdap.nic.it/domain/example.it"
+        assert kwargs["timeout"] == RDAP.TIMEOUT
+        assert out == {"ok": 2}
+
+    def test_domain_uses_default_when_tld_host_unresolvable(self):
+        with patch("domain_profiler.rdap.RDAP._is_host_resolvable", return_value=False):
+            with patch("domain_profiler.rdap.requests.request") as mock_req:
+                mock_req.return_value.json.return_value = {"ok": "default"}
+                out = RDAP().domain("example.it")
+        args, kwargs = mock_req.call_args
+        assert args[0] == "GET"
+        assert kwargs["url"] == "https://www.rdap.net/domain/example.it"
+        assert kwargs["timeout"] == RDAP.TIMEOUT
+        assert out == {"ok": "default"}
+
+    def test_domain_falls_back_to_default_server_on_request_error(self):
+        with patch("domain_profiler.rdap.RDAP._is_host_resolvable", return_value=True):
+            with patch("domain_profiler.rdap.requests.request") as mock_req:
+                first_resp = requests.RequestException("network")
+                second_resp = mock_req.return_value
+                second_resp.json.return_value = {"ok": "fallback"}
+                mock_req.side_effect = [first_resp, second_resp]
+                out = RDAP().domain("example.it")
+
+        assert mock_req.call_count == 2
+        first_call = mock_req.call_args_list[0]
+        second_call = mock_req.call_args_list[1]
+        assert first_call.kwargs["url"] == "https://rdap.nic.it/domain/example.it"
+        assert second_call.kwargs["url"] == "https://www.rdap.net/domain/example.it"
+        assert out == {"ok": "fallback"}
+
+    def test_domain_no_fallback_when_default_server_fails(self):
+        with patch("domain_profiler.rdap.requests.request") as mock_req:
+            mock_req.side_effect = requests.RequestException("boom")
+            try:
+                RDAP().domain("example.com")
+                assert False, "Expected RequestException"
+            except requests.RequestException:
+                pass
+
+        assert mock_req.call_count == 1
+        assert mock_req.call_args.kwargs["url"] == "https://www.rdap.net/domain/example.com"
+
     def test_autnum_calls_get_with_url_and_timeout(self):
         with patch("domain_profiler.rdap.requests.request") as mock_req:
             mock_req.return_value.json.return_value = {"ok": 3}
@@ -159,6 +265,14 @@ class TestRawRdapHttp:
         assert kwargs["url"] == "https://www.rdap.net/autnum/15169"
         assert kwargs["timeout"] == RDAP.TIMEOUT
         assert out == {"ok": 3}
+
+
+class TestRdapHostResolution:
+    def test_is_host_resolvable_false_for_bad_url(self):
+        assert RDAP._is_host_resolvable("notaurl") is False
+
+    def test_is_host_resolvable_true_for_localhost(self):
+        assert RDAP._is_host_resolvable("http://localhost") is True
 
 
 class TestParseDomainErrorGuard:
