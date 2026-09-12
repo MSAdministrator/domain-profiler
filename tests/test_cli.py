@@ -114,7 +114,7 @@ class TestCLI:
         profiler = Profiler()
         
         # These are the expected CLI commands that Fire should be able to generate
-        expected_methods = ['run']
+        expected_methods = ['run', 'whois']
         
         for method_name in expected_methods:
             assert hasattr(profiler, method_name)

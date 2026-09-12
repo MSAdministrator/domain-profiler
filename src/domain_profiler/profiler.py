@@ -80,12 +80,14 @@ class Profiler(Base):
     @staticmethod
     def _security_report(value: str) -> Dict[str, Any]:
         """Assemble the DNS-layer + TLS security section for a normalized host."""
+        rdap = RDAP()
         return {
             "dnssec": DNSSEC().validate(value),
             "caa": CAA().analyze(value),
-            "rdap": RDAP().report(value),
+            "rdap": rdap.report(value),
             "tls": TLSInspector().inspect(value),
             "takeover": Takeover().report(value),
+            "whois": rdap.whois_report(value),
         }
 
     def security(self, domain: str) -> Dict[str, Any]:
@@ -149,6 +151,17 @@ class Profiler(Base):
         return EmailAuth().get_report(
             domain=self._normalize_domain(domain), dkim_selector=dkim_selector
         )
+
+    def whois(self, domain: str) -> Dict[str, Any]:
+        """Fetch WHOIS registration data as a standalone command.
+
+        Args:
+            domain: The domain or URL to analyze
+
+        Returns:
+            Dict with WHOIS-derived registration summary.
+        """
+        return RDAP().whois_report(self._normalize_domain(domain))
 
     def rdap(self) -> RDAP:
         return RDAP()

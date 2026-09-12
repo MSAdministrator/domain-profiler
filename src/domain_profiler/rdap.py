@@ -7,9 +7,11 @@ expiry dates, EPP status codes, registrar, nameservers, and DNSSEC delegation â€
 into a stable shape suitable for a domain profile.
 """
 
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 import requests
+import whois
 
 from domain_profiler.base import Base
 
@@ -18,27 +20,84 @@ class RDAP(Base):
 
     BASE_URL: str = "https://www.rdap.net"
     TIMEOUT: float = 15.0
+    
+    # TLD-specific RDAP servers
+    TLD_SERVERS: Dict[str, str] = {
+        "it": "https://rdap.nic.it",
+        "de": "https://rdap.denic.de",
+        "fr": "https://rdap.afnic.fr",
+        "uk": "https://rdap.nominet.uk",
+        "br": "https://rdap.registro.br",
+        "ru": "https://rdap.tcinet.ru",
+        "cn": "https://rdap.cnnic.cn",
+        "au": "https://rdap.auda.org.au",
+        "ca": "https://rdap.cira.ca",
+        "ch": "https://rdap.switch.ch",
+        "at": "https://rdap.nic.at",
+        "nl": "https://rdap.sidn.nl",
+        "be": "https://rdap.dns.be",
+        "se": "https://rdap.iis.se",
+        "no": "https://rdap.norid.no",
+        "fi": "https://rdap.ficora.fi",
+        "pl": "https://rdap.dns.pl",
+        "es": "https://rdap.es",
+        "mx": "https://rdap.mx",
+        "in": "https://rdap.registry.in",
+        "jp": "https://rdap.jprs.jp",
+        "sg": "https://rdap.sgnic.sg",
+    }
+
+    def _get_rdap_url(self, domain: str) -> str:
+        """Get the appropriate RDAP base URL for a domain based on TLD."""
+        # Extract TLD
+        parts = domain.lower().split(".")
+        if len(parts) < 2:
+            return self.BASE_URL
+        
+        tld = parts[-1]
+        return self.TLD_SERVERS.get(tld, self.BASE_URL)
 
     def ip(self, ipaddress: str) -> dict:
-        return requests.request(
+        resp = requests.request(
             "GET",
             url=f"{self.BASE_URL}/ip/{ipaddress}",
             timeout=self.TIMEOUT,
-        ).json()
+        )
+        resp.raise_for_status()
+        return resp.json()
 
     def domain(self, domain: str) -> dict:
-        return requests.request(
-            "GET",
-            url=f"{self.BASE_URL}/domain/{domain}",
-            timeout=self.TIMEOUT,
-        ).json()
+        base_url = self._get_rdap_url(domain)
+        try:
+            resp = requests.request(
+                "GET",
+                url=f"{base_url}/domain/{domain}",
+                timeout=self.TIMEOUT,
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except requests.RequestException:
+            if base_url == self.BASE_URL:
+                raise
+
+            # Fallback to rdap.net when the registry-specific service is
+            # unavailable or unreachable from this network.
+            resp = requests.request(
+                "GET",
+                url=f"{self.BASE_URL}/domain/{domain}",
+                timeout=self.TIMEOUT,
+            )
+            resp.raise_for_status()
+            return resp.json()
 
     def autnum(self, autnum: str) -> dict:
-        return requests.request(
+        resp = requests.request(
             "GET",
             url=f"{self.BASE_URL}/autnum/{autnum}",
             timeout=self.TIMEOUT,
-        ).json()
+        )
+        resp.raise_for_status()
+        return resp.json()
 
     # -- parsing ------------------------------------------------------------
 
@@ -72,6 +131,88 @@ class RDAP(Base):
             if role in (entity.get("roles") or []):
                 return entity
         return None
+
+    @staticmethod
+    def _coerce_whois_date(value: Any) -> Optional[str]:
+        """Normalize WHOIS date fields to an ISO string."""
+        if isinstance(value, (list, tuple)):
+            value = value[-1] if value else None
+        if isinstance(value, date):
+            return value.isoformat()
+        return str(value) if value else None
+
+    @staticmethod
+    def _as_list(value: Any) -> List[str]:
+        """Normalize scalar/list WHOIS fields to a string list."""
+        if value is None:
+            return []
+        if isinstance(value, (list, tuple, set)):
+            return [str(item) for item in value if item]
+        return [str(value)]
+
+    @classmethod
+    def _as_nameserver_list(cls, value: Any) -> List[str]:
+        """Normalize WHOIS nameserver fields, including newline-delimited values."""
+        nameservers: List[str] = []
+        for item in cls._as_list(value):
+            parts = [part.strip() for part in item.splitlines() if part.strip()]
+            if parts:
+                nameservers.extend(parts)
+            elif item.strip():
+                nameservers.append(item.strip())
+        return nameservers
+
+    @staticmethod
+    def _first_value(value: Any) -> Optional[str]:
+        """Return the first non-empty scalar from a WHOIS field."""
+        values = RDAP._as_list(value)
+        return values[0] if values else None
+
+    def parse_whois_domain(self, raw: Dict[str, Any], domain: str) -> Dict[str, Any]:
+        """Extract a RDAP-like summary from python-whois data."""
+        nameservers = sorted(set(self._as_nameserver_list(raw.get("name_servers"))))
+        statuses = self._as_list(raw.get("status"))
+        return {
+            "domain": self._first_value(raw.get("domain_name")) or domain,
+            "handle": None,
+            "registrar": self._first_value(raw.get("registrar")),
+            "registrar_iana_id": None,
+            "registered": self._coerce_whois_date(raw.get("creation_date")),
+            "expires": self._coerce_whois_date(raw.get("expiration_date")),
+            "last_changed": self._coerce_whois_date(raw.get("updated_date")),
+            "statuses": statuses,
+            "nameservers": nameservers,
+            "dnssec_delegated": None,
+            "error": None,
+            "source": "whois",
+        }
+
+    def whois_domain(self, domain: str) -> Dict[str, Any]:
+        """Fetch WHOIS data and normalize it to the RDAP report shape."""
+        return self.parse_whois_domain(whois.whois(domain), domain)
+
+    def whois_report(self, domain: str) -> Dict[str, Any]:
+        """Fetch WHOIS data as a fail-soft report.
+
+        Returns a normalized WHOIS summary or an error-shaped dict.
+        """
+        try:
+            return self.whois_domain(domain)
+        except Exception as exc:
+            return {
+                "domain": domain,
+                "handle": None,
+                "registrar": None,
+                "registrar_iana_id": None,
+                "registered": None,
+                "expires": None,
+                "last_changed": None,
+                "statuses": [],
+                "nameservers": [],
+                "dnssec_delegated": None,
+                "error": f"WHOIS lookup failed: {exc}",
+                "source": "whois",
+            }
 
     def parse_domain(self, raw: Dict[str, Any]) -> Dict[str, Any]:
         """Extract security-relevant fields from a raw RDAP domain response.
@@ -134,6 +275,18 @@ class RDAP(Base):
         """
         try:
             raw = self.domain(domain)
+        except requests.HTTPError as exc:
+            status_code = exc.response.status_code if exc.response is not None else None
+            failed_url = exc.response.url if exc.response is not None else None
+            if status_code == 404:
+                detail = "RDAP record not found at provider"
+                if failed_url:
+                    detail = f"{detail}: {failed_url}"
+                return {"domain": domain, "error": detail}
+            return {
+                "domain": domain,
+                "error": f"RDAP HTTP error ({status_code}): {exc}",
+            }
         except Exception as exc:
             return {"domain": domain, "error": f"RDAP lookup failed: {exc}"}
         try:
