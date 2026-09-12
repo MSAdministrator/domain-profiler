@@ -91,6 +91,9 @@ domain-profiler run example.com --security
 # Security analysis only
 domain-profiler security example.com
 
+# WHOIS registration analysis only
+domain-profiler whois example.com
+
 # Email-authentication analysis only
 domain-profiler email example.com
 
@@ -125,10 +128,11 @@ email_data = profiler.run("example.com", email=True)
 # ...or standalone:
 email_only = profiler.email("example.com")
 
-# Security analysis (DNSSEC / CAA / RDAP / TLS / subdomain-takeover)
+# Security analysis (DNSSEC / CAA / RDAP / TLS / subdomain-takeover / WHOIS)
 security_data = profiler.run("example.com", security=True)
 # ...or standalone:
 security_only = profiler.security("example.com")
+whois_only = profiler.whois("example.com")
 
 print(full_data)
 ```
@@ -141,6 +145,8 @@ The CLI is built using Google Fire, providing an intuitive interface:
 
 ```bash
 domain-profiler run DOMAIN [--live] [--email] [--dkim-selector SELECTOR] [--security]
+
+domain-profiler whois DOMAIN
 ```
 
 #### Parameters
@@ -149,7 +155,7 @@ domain-profiler run DOMAIN [--live] [--email] [--dkim-selector SELECTOR] [--secu
 - `--live`: Enable website analysis in addition to DNS (optional, default: False)
 - `--email`: Enable email-authentication analysis — SPF/DKIM/DMARC/BIMI/MX (optional, default: False)
 - `--dkim-selector`: Extra DKIM selector to probe first (optional)
-- `--security`: Enable security analysis — DNSSEC/CAA/RDAP/TLS/subdomain-takeover (optional, default: False)
+- `--security`: Enable security analysis — DNSSEC/CAA/RDAP/TLS/subdomain-takeover/WHOIS (optional, default: False)
 
 #### Examples
 
@@ -198,6 +204,15 @@ When using `--live` flag, additional website data is included:
 - Domain registration information
 - Favicon hashes
 - Page title
+
+#### Security Analysis Additional Data
+When using `--security` flag (or the `security` command), the `security` object includes:
+- `dnssec`
+- `caa`
+- `rdap`
+- `tls`
+- `takeover`
+- `whois`
 
 ## Dependencies
 

@@ -207,35 +207,22 @@ class TestRawRdapHttp:
         assert out == {"ok": 2}
 
     def test_domain_uses_tld_specific_server_when_configured(self):
-        with patch("domain_profiler.rdap.RDAP._is_host_resolvable", return_value=True):
-            with patch("domain_profiler.rdap.requests.request") as mock_req:
-                mock_req.return_value.json.return_value = {"ok": 2}
-                out = RDAP().domain("example.it")
+        with patch("domain_profiler.rdap.requests.request") as mock_req:
+            mock_req.return_value.json.return_value = {"ok": 2}
+            out = RDAP().domain("example.it")
         args, kwargs = mock_req.call_args
         assert args[0] == "GET"
         assert kwargs["url"] == "https://rdap.nic.it/domain/example.it"
         assert kwargs["timeout"] == RDAP.TIMEOUT
         assert out == {"ok": 2}
 
-    def test_domain_uses_default_when_tld_host_unresolvable(self):
-        with patch("domain_profiler.rdap.RDAP._is_host_resolvable", return_value=False):
-            with patch("domain_profiler.rdap.requests.request") as mock_req:
-                mock_req.return_value.json.return_value = {"ok": "default"}
-                out = RDAP().domain("example.it")
-        args, kwargs = mock_req.call_args
-        assert args[0] == "GET"
-        assert kwargs["url"] == "https://www.rdap.net/domain/example.it"
-        assert kwargs["timeout"] == RDAP.TIMEOUT
-        assert out == {"ok": "default"}
-
     def test_domain_falls_back_to_default_server_on_request_error(self):
-        with patch("domain_profiler.rdap.RDAP._is_host_resolvable", return_value=True):
-            with patch("domain_profiler.rdap.requests.request") as mock_req:
-                first_resp = requests.RequestException("network")
-                second_resp = mock_req.return_value
-                second_resp.json.return_value = {"ok": "fallback"}
-                mock_req.side_effect = [first_resp, second_resp]
-                out = RDAP().domain("example.it")
+        with patch("domain_profiler.rdap.requests.request") as mock_req:
+            first_resp = requests.RequestException("network")
+            second_resp = mock_req.return_value
+            second_resp.json.return_value = {"ok": "fallback"}
+            mock_req.side_effect = [first_resp, second_resp]
+            out = RDAP().domain("example.it")
 
         assert mock_req.call_count == 2
         first_call = mock_req.call_args_list[0]
@@ -267,12 +254,28 @@ class TestRawRdapHttp:
         assert out == {"ok": 3}
 
 
-class TestRdapHostResolution:
-    def test_is_host_resolvable_false_for_bad_url(self):
-        assert RDAP._is_host_resolvable("notaurl") is False
+class TestWhoisLookup:
+    def test_whois_domain_delegates_to_python_whois(self):
+        whois_raw = {
+            "domain_name": "example.it",
+            "registrar": "Registrar SpA",
+            "status": ["ok"],
+            "name_servers": ["ns1.example.it"],
+        }
+        with patch("domain_profiler.rdap.whois.whois", return_value=whois_raw) as mock_whois:
+            result = RDAP().whois_domain("example.it")
+        mock_whois.assert_called_once_with("example.it")
+        assert result["domain"] == "example.it"
+        assert result["source"] == "whois"
 
-    def test_is_host_resolvable_true_for_localhost(self):
-        assert RDAP._is_host_resolvable("http://localhost") is True
+    def test_whois_report_returns_error_shape_on_lookup_failure(self):
+        with patch("domain_profiler.rdap.whois.whois", side_effect=Exception("timeout")):
+            result = RDAP().whois_report("example.it")
+        assert result["domain"] == "example.it"
+        assert result["source"] == "whois"
+        assert result["error"].startswith("WHOIS lookup failed")
+        assert result["statuses"] == []
+        assert result["nameservers"] == []
 
 
 class TestParseDomainErrorGuard:

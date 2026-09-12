@@ -7,10 +7,8 @@ expiry dates, EPP status codes, registrar, nameservers, and DNSSEC delegation â€
 into a stable shape suitable for a domain profile.
 """
 
-import socket
 from datetime import date
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
 
 import requests
 import whois
@@ -59,18 +57,6 @@ class RDAP(Base):
         tld = parts[-1]
         return self.TLD_SERVERS.get(tld, self.BASE_URL)
 
-    @staticmethod
-    def _is_host_resolvable(url: str) -> bool:
-        """Return True if URL host resolves in local DNS."""
-        host = urlparse(url).hostname
-        if not host:
-            return False
-        try:
-            socket.getaddrinfo(host, None)
-            return True
-        except OSError:
-            return False
-
     def ip(self, ipaddress: str) -> dict:
         resp = requests.request(
             "GET",
@@ -82,8 +68,6 @@ class RDAP(Base):
 
     def domain(self, domain: str) -> dict:
         base_url = self._get_rdap_url(domain)
-        if base_url != self.BASE_URL and not self._is_host_resolvable(base_url):
-            base_url = self.BASE_URL
         try:
             resp = requests.request(
                 "GET",
@@ -206,6 +190,29 @@ class RDAP(Base):
     def whois_domain(self, domain: str) -> Dict[str, Any]:
         """Fetch WHOIS data and normalize it to the RDAP report shape."""
         return self.parse_whois_domain(whois.whois(domain), domain)
+
+    def whois_report(self, domain: str) -> Dict[str, Any]:
+        """Fetch WHOIS data as a fail-soft report.
+
+        Returns a normalized WHOIS summary or an error-shaped dict.
+        """
+        try:
+            return self.whois_domain(domain)
+        except Exception as exc:
+            return {
+                "domain": domain,
+                "handle": None,
+                "registrar": None,
+                "registrar_iana_id": None,
+                "registered": None,
+                "expires": None,
+                "last_changed": None,
+                "statuses": [],
+                "nameservers": [],
+                "dnssec_delegated": None,
+                "error": f"WHOIS lookup failed: {exc}",
+                "source": "whois",
+            }
 
     def parse_domain(self, raw: Dict[str, Any]) -> Dict[str, Any]:
         """Extract security-relevant fields from a raw RDAP domain response.
