@@ -57,17 +57,17 @@ A comprehensive Python CLI tool and package for domain analysis and profiling. G
 
 ### From PyPI (Recommended)
 ```bash
-pip install domain-profiler
+uv tool install domain-profiler
 ```
 
 ### From Source
 ```bash
 git clone https://github.com/MSAdministrator/domain-profiler.git
 cd domain-profiler
-pip install -e .
+uv sync --dev
 ```
 
-### Using uv (Fast Python Package Manager)
+### Add as a uv dependency
 ```bash
 uv add domain-profiler
 ```
@@ -77,37 +77,37 @@ uv add domain-profiler
 ### Basic Domain Analysis
 ```bash
 # DNS-only analysis (fast)
-domain-profiler run example.com
+uv run domain-profiler run example.com
 
 # Full analysis including website profiling
-domain-profiler run example.com --live
+uv run domain-profiler run example.com --live
 
 # Include email-authentication analysis (SPF, DKIM, DMARC, BIMI, MX)
-domain-profiler run example.com --email
+uv run domain-profiler run example.com --email
 
 # Include security analysis (DNSSEC, CAA, RDAP, TLS, takeover)
-domain-profiler run example.com --security
+uv run domain-profiler run example.com --security
 
 # Security analysis only
-domain-profiler security example.com
+uv run domain-profiler security example.com
 
 # WHOIS registration analysis only
-domain-profiler whois example.com
+uv run domain-profiler whois example.com
 
 # Email-authentication analysis only
-domain-profiler email example.com
+uv run domain-profiler email example.com
 
 # Probe a specific DKIM selector first
-domain-profiler email example.com --dkim-selector google
+uv run domain-profiler email example.com --dkim-selector google
 
 # Inspect just the TLS certificate
-domain-profiler tls example.com
+uv run domain-profiler tls example.com
 
 # Check for wildcard DNS / dangling-CNAME takeover risk
-domain-profiler takeover example.com
+uv run domain-profiler takeover example.com
 
 # Score a candidate domain against a brand for typosquatting
-domain-profiler typosquat paypa1.com --brand paypal.com
+uv run domain-profiler typosquat paypa1.com --brand paypal.com
 ```
 
 ### Python API Usage
@@ -144,9 +144,9 @@ print(full_data)
 The CLI is built using Google Fire, providing an intuitive interface:
 
 ```bash
-domain-profiler run DOMAIN [--live] [--email] [--dkim-selector SELECTOR] [--security]
+uv run domain-profiler run DOMAIN [--live] [--email] [--dkim-selector SELECTOR] [--security]
 
-domain-profiler whois DOMAIN
+uv run domain-profiler whois DOMAIN
 ```
 
 #### Parameters
@@ -161,13 +161,13 @@ domain-profiler whois DOMAIN
 
 ```bash
 # Basic DNS analysis
-domain-profiler run google.com
+uv run domain-profiler run google.com
 
 # Full analysis with website profiling
-domain-profiler run https://example.com --live
+uv run domain-profiler run https://example.com --live
 
 # Analysis with IP address
-domain-profiler run 8.8.8.8
+uv run domain-profiler run 8.8.8.8
 ```
 
 ### Output Format
@@ -236,12 +236,8 @@ The tool uses several robust Python libraries:
 git clone https://github.com/MSAdministrator/domain-profiler.git
 cd domain-profiler
 
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install in development mode
-pip install -e .
+# Install the locked development environment
+uv sync --dev
 ```
 
 ### Project Structure
@@ -271,35 +267,35 @@ domain-profiler/
 ### Running Tests
 
 ```bash
-# Install development dependencies
-pip install -e ".[dev]"
+# Install development dependencies and sync the lockfile
+uv sync --dev
 
 # Run all tests
-pytest
+uv run pytest
 
 # Run tests with coverage
-pytest --cov=domain_profiler --cov-report=html
+uv run pytest --cov=domain_profiler --cov-report=html
 
 # Run tests in parallel
-pytest -n auto
+uv run pytest -n auto
 
 # Run specific test categories
-pytest -m unit          # Unit tests only
-pytest -m integration   # Integration tests only
-pytest -m "not slow"    # Skip slow tests
+uv run pytest -m unit          # Unit tests only
+uv run pytest -m integration   # Integration tests only
+uv run pytest -m "not slow"    # Skip slow tests
 
 # Run specific test files
-pytest tests/test_profiler.py
-pytest tests/test_dns.py
-pytest tests/test_site.py
-pytest tests/test_email_auth.py
-pytest tests/test_tls.py
+uv run pytest tests/test_profiler.py
+uv run pytest tests/test_dns.py
+uv run pytest tests/test_site.py
+uv run pytest tests/test_email_auth.py
+uv run pytest tests/test_tls.py
 
 # Run with verbose output
-pytest -v
+uv run pytest -v
 
 # Generate coverage report
-pytest --cov=domain_profiler --cov-report=term-missing
+uv run pytest --cov=domain_profiler --cov-report=term-missing
 ```
 
 ### Test Structure
