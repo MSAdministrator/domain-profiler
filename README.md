@@ -62,7 +62,7 @@ pip install domain-profiler
 
 ### From Source
 ```bash
-git clone https://github.com/sublime-security/domain-profiler.git
+git clone https://github.com/MSAdministrator/domain-profiler.git
 cd domain-profiler
 pip install -e .
 ```
@@ -233,7 +233,7 @@ The tool uses several robust Python libraries:
 
 ```bash
 # Clone the repository
-git clone https://github.com/sublime-security/domain-profiler.git
+git clone https://github.com/MSAdministrator/domain-profiler.git
 cd domain-profiler
 
 # Create virtual environment
@@ -416,7 +416,7 @@ make test-fast
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/sublime-security/domain-profiler/issues)
+- **Issues**: [GitHub Issues](https://github.com/MSAdministrator/domain-profiler/issues)
 - **Documentation**: This README and inline code documentation
 - **Python Version**: Requires Python 3.11+
 
