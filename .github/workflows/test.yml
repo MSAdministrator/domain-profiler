@@ -16,6 +16,9 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
     
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
@@ -23,13 +26,10 @@ jobs:
         python-version: ${{ matrix.python-version }}
     
     - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[dev]"
+      run: uv sync --locked --dev
     
     - name: Run tests with pytest
-      run: |
-        pytest --cov=domain_profiler --cov-report=xml --cov-report=term-missing
+      run: uv run pytest --cov=domain_profiler --cov-report=xml --cov-report=term-missing
     
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3
@@ -43,6 +43,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
     
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -50,14 +53,10 @@ jobs:
         python-version: '3.11'
     
     - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[dev]"
+      run: uv sync --locked --dev
     
     - name: Check package can be imported
-      run: |
-        python -c "import domain_profiler; print('Package imports successfully')"
+      run: uv run python -c "import domain_profiler; print('Package imports successfully')"
     
     - name: Check CLI works
-      run: |
-        domain-profiler --help || echo "CLI help check completed" 
+      run: uv run domain-profiler --help

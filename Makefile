@@ -7,29 +7,29 @@ help:  ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 install:  ## Install package in development mode with all dependencies
-	pip install -e ".[dev]"
+	uv sync --dev
 
 test:  ## Run all tests with coverage
-	pytest --cov=domain_profiler --cov-report=term-missing --cov-report=html
+	uv run pytest --cov=domain_profiler --cov-report=term-missing --cov-report=html
 
 test-fast:  ## Run tests in parallel (fast)
-	pytest -n auto
+	uv run pytest -n auto
 
 test-unit:  ## Run unit tests only
-	pytest -m unit
+	uv run pytest -m unit
 
 test-integration:  ## Run integration tests only
-	pytest -m integration
+	uv run pytest -m integration
 
 test-coverage:  ## Generate detailed coverage report
-	pytest --cov=domain_profiler --cov-report=html --cov-report=xml --cov-report=term
+	uv run pytest --cov=domain_profiler --cov-report=html --cov-report=xml --cov-report=term
 	@echo "Coverage report generated in htmlcov/index.html"
 
 test-verbose:  ## Run tests with verbose output
-	pytest -v
+	uv run pytest -v
 
 test-specific:  ## Run specific test file (use TEST_FILE=path/to/test.py)
-	pytest $(TEST_FILE) -v
+	uv run pytest $(TEST_FILE) -v
 
 clean:  ## Clean up build artifacts and cache files
 	rm -rf build/
@@ -55,17 +55,17 @@ check:  ## Run all checks (tests, linting, etc.)
 	$(MAKE) type-check
 
 build:  ## Build package
-	python -m build
+	uv build
 
 install-from-source:  ## Install from source
-	pip install -e .
+	uv sync --dev
 
 run-example:  ## Run example commands
 	@echo "Running DNS analysis example:"
-	domain-profiler run example.com
+	uv run domain-profiler run example.com
 	@echo ""
 	@echo "Running live analysis example (will make real network calls):"
-	domain-profiler run example.com --live
+	uv run domain-profiler run example.com --live
 
 dev-setup:  ## Complete development setup
 	$(MAKE) install
